@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Fleet</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --ink: #1c2329;
+    --muted: #5f6b76;
+    --line: #e1e6eb;
+    --accent: #0a7fc2;
+    --good: #1e8a4c;
+    --good-bg: #e3f4ea;
+    --warn: #a15c00;
+    --warn-bg: #fdf0dc;
+    --bad: #b3261e;
+    --off: #9aa5af;
+    --chip: #eef2f5;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111416;
+      --surface: #1b2024;
+      --ink: #e6ebef;
+      --muted: #9aa6b0;
+      --line: #2a3137;
+      --accent: #4fb3ea;
+      --good: #5fd08e;
+      --good-bg: #183324;
+      --warn: #f0b35a;
+      --warn-bg: #3a2c14;
+      --bad: #f28b82;
+      --off: #5c666e;
+      --chip: #252c31;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111416; --surface: #1b2024; --ink: #e6ebef; --muted: #9aa6b0;
+    --line: #2a3137; --accent: #4fb3ea; --good: #5fd08e; --good-bg: #183324;
+    --warn: #f0b35a; --warn-bg: #3a2c14; --bad: #f28b82; --off: #5c666e; --chip: #252c31;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.45 Roboto, "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; margin-bottom: 16px; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0; letter-spacing: -0.01em; }
+  .summary { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .summary b { color: var(--ink); font-weight: 500; }
+  .summary .warn b { color: var(--warn); }
+  .spacer { flex: 1; }
+  button {
+    font: inherit; color: var(--accent); background: transparent;
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { background: var(--chip); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .note { color: var(--muted); font-size: 13px; margin: -6px 0 14px; }
+  .note.err { color: var(--bad); }
+
+  .table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 860px; }
+  th {
+    text-align: left; font-weight: 500; font-size: 12px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  tr.offline td { color: var(--muted); }
+  .name { font-weight: 500; color: var(--ink); }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  .mono { font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .status { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
+  .online .dot { background: var(--good); box-shadow: 0 0 0 3px var(--good-bg); }
+  .chip {
+    display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
+    background: var(--chip); color: var(--muted); white-space: nowrap; vertical-align: 1px;
+  }
+  .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+  .badge.current { background: var(--good-bg); color: var(--good); }
+  .badge.outdated { background: var(--warn-bg); color: var(--warn); }
+  .badge.ahead, .badge.unknown { background: var(--chip); color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page { max-width: 260px; overflow-wrap: anywhere; }
+  .actions { white-space: nowrap; text-align: right; }
+  .actions button { padding: 3px 9px; font-size: 12.5px; color: var(--muted); }
+  .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+  @media (prefers-reduced-motion: no-preference) { .dot { transition: background 0.3s; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Panel Fleet</h1>
+    <div class="summary" id="summary"></div>
+    <div class="spacer"></div>
+    <button id="scan" type="button">Scan now</button>
+  </header>
+  <p class="note" id="note"></p>
+  <div class="table">
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Panel</th>
+          <th>Version</th>
+          <th>Showing</th>
+          <th>Address</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="6" class="empty">Looking for panels…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+<script>
+const KIND = { ks: 'Kiosk Satellite', paneld: 'ha-paneld' };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function ago(ts, now) {
+  if (!ts) return 'never';
+  const s = Math.max(0, now - ts);
+  if (s < 90) return 'just now';
+  if (s < 5400) return Math.round(s / 60) + ' min ago';
+  if (s < 129600) return Math.round(s / 3600) + ' h ago';
+  return Math.round(s / 86400) + ' days ago';
+}
+function duration(s) {
+  if (s == null) return '';
+  if (s < 3600) return Math.round(s / 60) + ' min';
+  if (s < 172800) return Math.round(s / 3600) + ' h';
+  return Math.round(s / 86400) + ' days';
+}
+function versionCell(d) {
+  if (!d.version) return '<span class="sub">unknown</span>';
+  const base = d.fork ? d.version.slice(0, d.version.length - d.fork.length) : d.version;
+  const label = {
+    current: 'Current',
+    outdated: 'Update to ' + esc(d.latest),
+    ahead: 'Newer than release',
+    unknown: 'Latest unknown',
+  }[d.version_status];
+  return `<div class="mono">${esc(base)}</div>` +
+    (d.fork ? `<div class="sub mono" title="Fork build">${esc(d.fork.replace(/^-/, ''))}</div>` : '') +
+    `<div style="margin-top:4px"><span class="badge ${d.version_status}">${label}</span></div>`;
+}
+function pageCell(d) {
+  if (!d.dashboard_href) return '<span class="sub">not reported</span>';
+  // A bare path is a Home Assistant page: open it on Home Assistant's own origin.
+  const href = d.dashboard_href.startsWith('/') ? new URL(d.dashboard_href, location.origin).href : d.dashboard_href;
+  const home = d.kind === 'paneld' && d.home_dashboard && d.home_dashboard !== d.dashboard_path
+    ? `<div class="sub">home <span class="mono">${esc(d.home_dashboard)}</span></div>` : '';
+  return `<a class="page mono" href="${esc(href)}" target="_blank" rel="noopener">${esc(d.dashboard_path)}</a>${home}`;
+}
+function statusCell(d, now) {
+  if (d.online == null) return '<div class="status"><span class="dot"></span>Checking…</div>';
+  if (!d.online) {
+    return `<div class="status"><span class="dot"></span>Offline</div><div class="sub">seen ${ago(d.last_seen || d.announced, now)}</div>`;
+  }
+  return '<div class="status online"><span class="dot"></span>Online</div>' +
+    (d.uptime != null ? `<div class="sub">up ${duration(d.uptime)}</div>` : '') +
+    (d.screen_on === false ? '<div class="sub">screen off</div>' : '');
+}
+function row(d, now) {
+  const on = d.online !== false;
+  const status = statusCell(d, now);
+  const model = [d.model, d.android].filter(Boolean).join(' · ');
+  return `<tr class="${on ? '' : 'offline'}">
+    <td>${status}</td>
+    <td><div class="name">${esc(d.name || d.id)}</div>
+        <div class="sub">${esc(model)}</div>
+        <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span></div></td>
+    <td>${versionCell(d)}</td>
+    <td>${pageCell(d)}</td>
+    <td><div class="mono">${esc(d.host || '')}</div>${d.hostname ? `<div class="sub mono">${esc(d.hostname)}.local</div>` : ''}</td>
+    <td class="actions">
+      ${d.admin ? `<a href="${esc(d.admin)}" target="_blank" rel="noopener">Admin</a>` : ''}
+      ${d.online !== false ? '' : `<button type="button" data-forget="${esc(d.key)}" title="Remove until it is discovered again">Forget</button>`}
+    </td>
+  </tr>`;
+}
+function render(data) {
+  const ds = data.devices;
+  const online = ds.filter((d) => d.online).length;
+  const outdated = ds.filter((d) => d.version_status === 'outdated').length;
+  const latest = Object.entries(data.latest || {})
+    .map(([k, v]) => `${KIND[k] || k} <a href="${esc(v.url)}" target="_blank" rel="noopener" class="mono">${esc(v.version)}</a>`)
+    .join(' · ');
+  $('summary').innerHTML =
+    `<span><b>${ds.length}</b> panels</span>` +
+    `<span><b>${online}</b> online</span>` +
+    `<span class="${outdated ? 'warn' : ''}"><b>${outdated}</b> need an update</span>` +
+    (latest ? `<span>Latest: ${latest}</span>` : '');
+  $('note').textContent = data.ha_error ? `Pages shown need Home Assistant (${data.ha_error}).` : '';
+  $('note').className = 'note' + (data.ha_error ? ' err' : '');
+  $('rows').innerHTML = ds.length
+    ? ds.map((d) => row(d, data.now)).join('')
+    : '<tr><td colspan="6" class="empty">No panels found yet. Kiosk Satellite panels announce themselves when their remote admin is on.</td></tr>';
+}
+async function load(path = 'api/devices', init) {
+  try {
+    const r = await fetch(path, init);
+    render(await r.json());
+  } catch (e) {
+    $('note').textContent = 'Could not reach the add-on: ' + e.message;
+    $('note').className = 'note err';
+  }
+}
+$('scan').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  e.target.textContent = 'Scanning…';
+  await load('api/scan', { method: 'POST' });
+  e.target.disabled = false;
+  e.target.textContent = 'Scan now';
+});
+$('rows').addEventListener('click', (e) => {
+  const key = e.target.dataset.forget;
+  if (key) load('api/devices/' + encodeURIComponent(key), { method: 'DELETE' });
+});
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
