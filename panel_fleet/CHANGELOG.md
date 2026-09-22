@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Sidebar icon is now `mdi:monitor-dashboard`, so it is not mistaken for Panel Assistant's `mdi:tablet-dashboard`.
+
 ## 0.1.3
 
 - An icon and logo for the add-on store.
