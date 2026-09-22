@@ -136,12 +136,12 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function ago(ts, now) {
-  if (!ts) return 'never';
+  if (!ts) return 'never seen';
   const s = Math.max(0, now - ts);
-  if (s < 90) return 'just now';
-  if (s < 5400) return Math.round(s / 60) + ' min ago';
-  if (s < 129600) return Math.round(s / 3600) + ' h ago';
-  return Math.round(s / 86400) + ' days ago';
+  if (s < 60) return 'last seen just now';
+  if (s < 3600) return `last seen ${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `last seen ${Math.floor(s / 3600)}h ago`;
+  return `last seen ${Math.floor(s / 86400)}d ago`;
 }
 function duration(s) {
   if (s == null) return '';
@@ -173,7 +173,7 @@ function pageCell(d) {
 function statusCell(d, now) {
   if (d.online == null) return '<div class="status"><span class="dot"></span>Checking…</div>';
   if (!d.online) {
-    return `<div class="status"><span class="dot"></span>Offline</div><div class="sub">seen ${ago(d.last_seen || d.announced, now)}</div>`;
+    return `<div class="status"><span class="dot"></span>Offline</div><div class="sub">${ago(d.last_seen || d.announced, now)}</div>`;
   }
   return '<div class="status online"><span class="dot"></span>Online</div>' +
     (d.uptime != null ? `<div class="sub">up ${duration(d.uptime)}</div>` : '') +

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- An offline panel says how long ago it was last seen: "last seen 3h ago", or "2d ago" past a day.
+
 ## 0.1.1
 
 - The panels now show the page they are on: the add-on reaches Home Assistant (its container start no longer drops the Supervisor token).
