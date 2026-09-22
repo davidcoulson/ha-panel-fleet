@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- An icon and logo for the add-on store.
+
 ## 0.1.2
 
 - An offline panel says how long ago it was last seen: "last seen 3h ago", or "2d ago" past a day.
