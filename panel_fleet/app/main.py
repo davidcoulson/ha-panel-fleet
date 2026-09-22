@@ -95,6 +95,7 @@ class Fleet:
         self.devices = {}
         self.latest = {}  # kind -> {"version", "url", "checked"}
         self.ha_error = None
+        self.on_new = None  # called with a newly found panel
         self._load()
 
     def _load(self):
@@ -129,6 +130,8 @@ class Fleet:
                 "misses": 0,
             }
             log.info("found %s %s at %s", kind, fields.get("name") or ident, fields.get("host"))
+            if self.on_new:
+                self.on_new(d)
         for k, v in fields.items():
             if v not in (None, ""):
                 d[k] = v
@@ -267,24 +270,32 @@ async def poll_once(session):
         await _poll_all(session)
 
 
-async def _poll_all(session):
-    async def one(d):
-        try:
-            fields = await (_poll_ks if d["kind"] == "ks" else _poll_paneld)(session, d)
-            for k, v in fields.items():
-                if v not in (None, ""):
-                    d[k] = v
-            d["online"] = True
-            d["misses"] = 0
-            d["last_seen"] = time.time()
-            d.pop("error", None)
-        except Exception as e:  # any failure is just "did not answer"
-            d["misses"] = d.get("misses", 0) + 1
-            d["error"] = type(e).__name__ if not str(e) else str(e)[:160]
-            if d["misses"] >= OFFLINE_AFTER:
-                d["online"] = False
+async def poll_device(session, d):
+    try:
+        fields = await (_poll_ks if d["kind"] == "ks" else _poll_paneld)(session, d)
+        for k, v in fields.items():
+            if v not in (None, ""):
+                d[k] = v
+        d["online"] = True
+        d["misses"] = 0
+        d["last_seen"] = time.time()
+        d.pop("error", None)
+    except Exception as e:  # any failure is just "did not answer"
+        d["misses"] = d.get("misses", 0) + 1
+        d["error"] = type(e).__name__ if not str(e) else str(e)[:160]
+        if d["misses"] >= OFFLINE_AFTER:
+            d["online"] = False
 
-    await asyncio.gather(*(one(d) for d in list(fleet.devices.values())))
+
+async def _poll_all(session):
+    await asyncio.gather(*(poll_device(session, d) for d in list(fleet.devices.values())))
+    await enrich_from_ha(session)
+    fleet.save()
+
+
+async def _first_poll(session, d):
+    """A panel just found is polled at once, not at the next interval."""
+    await poll_device(session, d)
     await enrich_from_ha(session)
     fleet.save()
 
@@ -446,6 +457,7 @@ async def main():
     async with aiohttp.ClientSession(timeout=timeout) as session:
         app = web.Application(middlewares=[only_ingress])
         app["session"] = session
+        fleet.on_new = lambda d: asyncio.ensure_future(_first_poll(session, d))
         app.router.add_get("/", index)
         app.router.add_get("/api/devices", api_devices)
         app.router.add_post("/api/scan", api_scan)

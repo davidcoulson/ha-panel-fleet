@@ -94,6 +94,12 @@
   a:hover { text-decoration: underline; }
   .page { max-width: 260px; overflow-wrap: anywhere; }
   .actions { white-space: nowrap; text-align: right; }
+  .open {
+    display: inline-flex; vertical-align: -3px; margin-left: 6px;
+    color: var(--muted); border-radius: 4px;
+  }
+  .open:hover { color: var(--accent); text-decoration: none; }
+  .open svg { width: 17px; height: 17px; fill: currentColor; }
   .actions button { padding: 3px 9px; font-size: 12.5px; color: var(--muted); }
   .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
   @media (prefers-reduced-motion: no-preference) { .dot { transition: background 0.3s; } }
@@ -179,14 +185,15 @@ function row(d, now) {
   const model = [d.model, d.android].filter(Boolean).join(' · ');
   return `<tr class="${on ? '' : 'offline'}">
     <td>${status}</td>
-    <td><div class="name">${esc(d.name || d.id)}</div>
+    <td><div class="name">${esc(d.name || d.id)}${d.admin
+          ? `<a class="open" href="${esc(d.admin)}" target="_blank" rel="noopener" title="Open the admin page" aria-label="Open the admin page for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7Z"/></svg></a>`
+          : ''}</div>
         <div class="sub">${esc(model)}</div>
         <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span></div></td>
     <td>${versionCell(d)}</td>
     <td>${pageCell(d)}</td>
     <td><div class="mono">${esc(d.host || '')}</div>${d.hostname ? `<div class="sub mono">${esc(d.hostname)}.local</div>` : ''}</td>
     <td class="actions">
-      ${d.admin ? `<a href="${esc(d.admin)}" target="_blank" rel="noopener">Admin</a>` : ''}
       ${d.online !== false ? '' : `<button type="button" data-forget="${esc(d.key)}" title="Remove until it is discovered again">Forget</button>`}
     </td>
   </tr>`;

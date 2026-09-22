@@ -10,7 +10,7 @@ Panel Fleet finds the wall panels on your network and lists them in one place.
 | **Panel** | Name, model and Android version from the panel. |
 | **Version** | The installed app version, compared with the latest GitHub release of [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite/releases) or [ha-paneld](https://github.com/maxlyth/ha-paneld/releases). A fork build such as `2026.9.74-djc-…` is compared by the release it is built on. |
 | **Showing** | For Kiosk Satellite, its **Current page** sensor in Home Assistant, matched to the panel by its IPv4 address sensor. For ha-paneld, the page it reports, or its home dashboard. |
-| **Admin** | A link to the panel's own admin page: port 2324 for Kiosk Satellite, 8888 for ha-paneld. |
+| **Open** (the icon after the name) | The panel's own admin page: port 2324 for Kiosk Satellite, 8888 for ha-paneld. |
 
 ## Discovery
 
