@@ -183,12 +183,30 @@ function webviewText(d) {
   return `<span class="${behind ? 'lag' : ''}" title="${esc(d.webview_package || '')} ${esc(d.webview)}${
     behind ? ` \u2014 the fleet is on ${esc(fleetWebview)}` : ''}">WebView ${esc(String(mine ?? d.webview))}${behind ? ' \u2193' : ''}</span>`;
 }
+// A channel's centre frequency as the band and channel people name it by.
+// 2484 is channel 14 and 5935 is 6 GHz channel 2; both sit outside their
+// band's arithmetic, which is why they are spelled out.
+function channel(mhz) {
+  if (!mhz) return null;
+  if (mhz === 2484) return { band: '2.4 GHz', ch: 14 };
+  if (mhz >= 2412 && mhz <= 2472) return { band: '2.4 GHz', ch: (mhz - 2407) / 5 };
+  if (mhz >= 5160 && mhz <= 5885) return { band: '5 GHz', ch: (mhz - 5000) / 5 };
+  if (mhz === 5935) return { band: '6 GHz', ch: 2 };
+  if (mhz >= 5955 && mhz <= 7115) return { band: '6 GHz', ch: (mhz - 5950) / 5 };
+  return null;
+}
 function linkText(d) {
   const l = d.link;
   if (!l || !l.type) return '';
   const name = { ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[l.type] || l.type;
   if (l.type !== 'wifi') return name;
-  return name + (l.rssi != null ? ` ${l.rssi} dBm` : '') + (l.speedMbps ? ` \u00b7 ${l.speedMbps} Mbps` : '');
+  const c = channel(l.frequencyMhz);
+  return [
+    name + (c ? ` ${c.band}` : ''),
+    c ? `ch ${c.ch}` : '',
+    l.rssi != null ? `${l.rssi} dBm` : '',
+    l.speedMbps ? `${l.speedMbps} Mbps` : '',
+  ].filter(Boolean).join(' \u00b7 ');
 }
 function detailRow(d) {
   const rows = [

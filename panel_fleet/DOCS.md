@@ -7,7 +7,7 @@ Panel Fleet finds the wall panels on your network and lists them in one place.
 | Column | Where it comes from |
 | --- | --- |
 | **Status** | Each panel's health endpoint, polled every scan interval. A panel reads offline after three missed polls in a row, and stays listed with when it was last seen. |
-| **Panel** | Name, model and Android version from the panel, then its display (size, orientation, and by how much it is turned when it is not upright), its system WebView and how it is on the network — Ethernet, or Wi-Fi with signal and link speed. A WebView older than the best-updated panel in the fleet is marked. |
+| **Panel** | Name, model and Android version from the panel, then its display (size, orientation, and by how much it is turned when it is not upright), its system WebView and how it is on the network — Ethernet, or Wi-Fi with its band, channel, signal and link speed. A WebView older than the best-updated panel in the fleet is marked. |
 | **Details** (the chevron at the end of a row) | Everything the panel reports: display and dpi, Android version, API level and build, WebView package, network, memory, storage, CPU, how long the device has been up beside how long the app has, and battery where there is one. |
 | **Version** | The installed app version, compared with the latest GitHub release of [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite/releases) or [ha-paneld](https://github.com/maxlyth/ha-paneld/releases). A fork build such as `2026.9.74-djc-…` is compared by the release it is built on. |
 | **Showing** | For Kiosk Satellite, its **Current page** sensor in Home Assistant, matched to the panel by its IPv4 address sensor. For ha-paneld, the page it reports, or its home dashboard. |

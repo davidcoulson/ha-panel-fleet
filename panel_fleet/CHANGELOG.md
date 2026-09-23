@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- A Wi-Fi panel says which band and channel it is on: "Wi-Fi 5 GHz · ch 60 · −45 dBm · 432 Mbps". Needs Kiosk Satellite build `2026.9.77-djc-2026.09.22.09` or newer.
+
 ## 0.1.5
 
 - Every panel row now carries its display (size, orientation and, when it is turned, by how much), its system WebView and how it is on the network — Ethernet, or Wi-Fi with signal and link speed.
