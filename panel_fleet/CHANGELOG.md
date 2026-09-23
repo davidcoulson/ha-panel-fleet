@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- The filters are one dropdown, laid out like the ESPHome dashboard's: a search box on its own, then **Filters** with a section per question — Status, Software, Platform, Android, Network and Needs attention — each listing the values the fleet actually has, with counts. Tick several inside a section to widen, across sections to narrow.
+- A WebView is only marked as behind when another panel **on the same Android version or older** runs a newer one. Android 8.1 stops at WebView 138, so those panels are no longer flagged for standing still where the road ends.
+- A panel's name keeps its open-in-new icon on the same line.
+
 ## 0.1.9
 
 - **Platform** is a column of its own: model, Android version and the system WebView. The panel column keeps the name, the `.local` address under it, and which software it runs.

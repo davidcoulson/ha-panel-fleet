@@ -64,15 +64,52 @@
   button:hover { background: var(--chip); }
   button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .note { color: var(--muted); font-size: 13px; margin: -6px 0 14px; }
-  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 14px; }
-  .filters label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
-  .filters select, .filters input {
-    font: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
-    border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .search { position: relative; flex: 1 1 320px; max-width: 460px; }
+  .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; fill: var(--muted); }
+  .search input {
+    width: 100%; font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 10px 38px;
   }
-  .filters input { min-width: 260px; }
-  .filters select:focus-visible, .filters input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .filters button { font-size: 13px; padding: 5px 10px; }
+  .filter-wrap { position: relative; }
+  .filter-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 10px; color: var(--ink); }
+  .filter-btn svg { width: 17px; height: 17px; fill: var(--muted); }
+  .filter-btn[aria-expanded="true"] { border-style: dashed; border-color: var(--accent); }
+  .badge-count {
+    min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent);
+    color: var(--surface); font-size: 11.5px; line-height: 18px; text-align: center;
+  }
+  .filter-pop {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 300px;
+    max-height: 70vh; overflow-y: auto; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.28);
+  }
+  .pop-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+  }
+  .pop-head button { padding: 3px 9px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+  .filter-pop details { border-bottom: 1px solid var(--line); }
+  .filter-pop details:last-child { border-bottom: 0; }
+  .filter-pop summary {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 14px; cursor: pointer; font-size: 14px; list-style: none;
+  }
+  .filter-pop summary::-webkit-details-marker { display: none; }
+  .filter-pop summary::after {
+    content: ""; width: 8px; height: 8px; margin-right: 2px;
+    border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+    transform: rotate(45deg) translate(-2px, -2px);
+  }
+  .filter-pop details[open] summary::after { transform: rotate(-135deg) translate(-3px, -3px); }
+  .filter-pop summary:hover { background: var(--chip); }
+  .opt { display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 16px; cursor: pointer; font-size: 13.5px; }
+  .opt:hover { background: var(--chip); }
+  .opt input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+  .opt .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .opt.none { color: var(--muted); cursor: default; }
+  .filter-pop details > div { padding-bottom: 8px; }
   .note.err { color: var(--bad); }
 
   .table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
@@ -85,7 +122,9 @@
   td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tr:last-child td { border-bottom: 0; }
   tr.offline td { color: var(--muted); }
-  .name { font-weight: 500; color: var(--ink); }
+  /* The name and its open-in-new icon are one line: the icon dropping to a
+     line of its own read as a second, empty row. */
+  .name { font-weight: 500; color: var(--ink); white-space: nowrap; }
   .sub { color: var(--muted); font-size: 12.5px; }
   .mono { font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
   .status { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
@@ -141,36 +180,21 @@
     <button id="scan" type="button">Scan now</button>
   </header>
   <p class="note" id="note"></p>
-  <div class="filters">
-    <input id="q" type="search" placeholder="Filter by name, model or address" aria-label="Filter panels">
-    <label>Status
-      <select id="f-status">
-        <option value="">Any</option>
-        <option value="online">Online</option>
-        <option value="offline">Offline</option>
-      </select>
-    </label>
-    <label>Software
-      <select id="f-kind">
-        <option value="">Any</option>
-        <option value="ks">Kiosk Satellite</option>
-        <option value="paneld">ha-paneld</option>
-      </select>
-    </label>
-    <label>Version
-      <select id="f-version">
-        <option value="">Any</option>
-        <option value="outdated">Needs an update</option>
-        <option value="current">Current</option>
-      </select>
-    </label>
-    <label>WebView
-      <select id="f-webview">
-        <option value="">Any</option>
-        <option value="behind">Behind the fleet</option>
-      </select>
-    </label>
-    <button id="clear" type="button" hidden>Clear</button>
+  <div class="toolbar">
+    <div class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 3a6.5 6.5 0 0 1 5.25 10.33l5.46 5.46-1.42 1.42-5.46-5.46A6.5 6.5 0 1 1 9.5 3Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z"/></svg>
+      <input id="q" type="search" placeholder="Search panels…" aria-label="Search panels">
+    </div>
+    <div class="filter-wrap">
+      <button id="filter-btn" type="button" class="filter-btn" aria-expanded="false" aria-controls="filter-pop">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2H3V5Zm3 6h12v2H6v-2Zm3 6h6v2H9v-2Z"/></svg>
+        Filters<span class="badge-count" id="filter-count" hidden></span>
+      </button>
+      <div class="filter-pop" id="filter-pop" hidden>
+        <div class="pop-head"><span>Filters</span><button id="clear" type="button" hidden>Clear all</button></div>
+        <div id="filter-sections"></div>
+      </div>
+    </div>
   </div>
   <div class="table">
     <table>
@@ -209,16 +233,34 @@ function duration(s) {
   if (s < 172800) return Math.round(s / 3600) + ' h';
   return Math.round(s / 86400) + ' days';
 }
-// The WebView the fleet's best-updated panel runs, so a panel left behind
-// can be told from one that is simply on the version everybody is on.
-let fleetWebview = null;
+// Every panel's WebView, with the Android it runs on, so one left behind can
+// be told from one that has simply run out of road: Chrome and the WebView
+// stop shipping for old Android, and WebView 138 is as far as Android 8.1
+// goes. A panel counts as behind only when another panel on the same Android
+// or older runs something newer - a comparison the fleet can make from what
+// it has, without a table of ceilings that would need maintaining.
+let fleetWebviews = [];
 function major(v) { const n = parseInt(String(v || ''), 10); return Number.isFinite(n) ? n : null; }
+function bestWebviewFor(d) {
+  const api = d.android_api;
+  let best = null;
+  for (const other of fleetWebviews) {
+    if (api != null && other.api != null && other.api > api) continue;
+    if (best == null || other.major > best) best = other.major;
+  }
+  return best;
+}
+function webviewBehind(d) {
+  const mine = major(d.webview), best = bestWebviewFor(d);
+  return mine != null && best != null && mine < best;
+}
 function webviewText(d) {
   if (!d.webview) return '';
-  const mine = major(d.webview), best = major(fleetWebview);
-  const behind = mine != null && best != null && mine < best;
+  const mine = major(d.webview);
+  const behind = webviewBehind(d);
   return `<span class="${behind ? 'lag' : ''}" title="${esc(d.webview_package || '')} ${esc(d.webview)}${
-    behind ? ` \u2014 the fleet is on ${esc(fleetWebview)}` : ''}">WebView ${esc(String(mine ?? d.webview))}${behind ? ' \u2193' : ''}</span>`;
+    behind ? ` \u2014 another panel on this Android or older runs ${bestWebviewFor(d)}` : ''
+  }">WebView ${esc(String(mine ?? d.webview))}${behind ? ' \u2193' : ''}</span>`;
 }
 // A channel's centre frequency as the band and channel people name it by.
 // 2484 is channel 14 and 5935 is 6 GHz channel 2; both sit outside their
@@ -329,55 +371,97 @@ function row(d, now) {
 const open = new Set();
 let last = null;
 
-// The filters, remembered per browser: whoever narrowed the list to the
-// offline panels was in the middle of something, and a refresh should not
-// undo it. Browser storage can throw (private windows), so every touch is
+// One dropdown, one section per question the fleet can answer about itself.
+// Each section names the values a panel has; ticking several inside a section
+// widens the list (online OR offline), ticking across sections narrows it.
+const SECTIONS = [
+  { key: 'status', label: 'Status', of: (d) => [d.online === true ? 'Online' : d.online === false ? 'Offline' : 'Checking'] },
+  { key: 'kind', label: 'Software', of: (d) => [KIND[d.kind] || d.kind] },
+  { key: 'model', label: 'Platform', of: (d) => [d.model || 'Unknown'] },
+  { key: 'android', label: 'Android', of: (d) => [d.android || 'Unknown'] },
+  { key: 'link', label: 'Network', of: (d) => {
+      const t = (d.link || {}).type;
+      return [{ ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[t] || 'Unknown'];
+    } },
+  // The only section where a panel can land in more than one row, or none.
+  { key: 'attention', label: 'Needs attention', of: (d) => [
+      d.version_status === 'outdated' ? 'Update available' : null,
+      webviewBehind(d) ? 'WebView behind the fleet' : null,
+      d.screen_on === false ? 'Screen off' : null,
+    ].filter(Boolean) },
+];
+
+// Ticked values per section, remembered per browser: whoever narrowed the
+// list to the offline panels was in the middle of something, and a refresh
+// should not undo it. Storage can throw (private windows), so every touch is
 // guarded and the page works without it.
-const FILTERS = ['q', 'f-status', 'f-kind', 'f-version', 'f-webview'];
-function filterState() {
-  const out = {};
-  for (const id of FILTERS) out[id] = $(id).value;
-  return out;
-}
-function saveFilters() {
-  try { localStorage.setItem('panel-fleet-filters', JSON.stringify(filterState())); } catch (e) { /* fine */ }
-}
+let picked = {};
 function loadFilters() {
   try {
     const saved = JSON.parse(localStorage.getItem('panel-fleet-filters') || '{}');
-    for (const id of FILTERS) if (typeof saved[id] === 'string') $(id).value = saved[id];
+    picked = {};
+    for (const sec of SECTIONS) {
+      if (Array.isArray(saved[sec.key])) picked[sec.key] = new Set(saved[sec.key]);
+    }
+    if (typeof saved.q === 'string') $('q').value = saved.q;
   } catch (e) { /* fine */ }
 }
-// A panel is behind only when another panel proves a newer WebView exists.
-function webviewBehind(d) {
-  const mine = major(d.webview), best = major(fleetWebview);
-  return mine != null && best != null && mine < best;
+function saveFilters() {
+  const out = { q: $('q').value };
+  for (const [k, v] of Object.entries(picked)) if (v.size) out[k] = [...v];
+  try { localStorage.setItem('panel-fleet-filters', JSON.stringify(out)); } catch (e) { /* fine */ }
 }
-function matches(d) {
-  const f = filterState();
-  const q = f.q.trim().toLowerCase();
-  if (q) {
-    const hay = [d.name, d.id, d.model, d.android, d.host, d.hostname, d.version,
-      d.dashboard_path, KIND[d.kind]].filter(Boolean).join(' ').toLowerCase();
-    if (!hay.includes(q)) return false;
+function activeCount() {
+  return Object.values(picked).reduce((n, v) => n + v.size, 0);
+}
+function matchesSearch(d) {
+  const q = $('q').value.trim().toLowerCase();
+  if (!q) return true;
+  return [d.name, d.id, d.model, d.android, d.host, d.hostname, d.version,
+    d.dashboard_path, d.webview, KIND[d.kind]].filter(Boolean).join(' ').toLowerCase().includes(q);
+}
+// `except` leaves one section out, so its own counts are measured against
+// everything else — the count beside a value says what ticking it would give.
+function matches(d, except) {
+  if (!matchesSearch(d)) return false;
+  for (const sec of SECTIONS) {
+    if (sec.key === except) continue;
+    const want = picked[sec.key];
+    if (!want || !want.size) continue;
+    if (!sec.of(d).some((v) => want.has(v))) return false;
   }
-  // "Checking…" (online null) counts as neither, so a panel mid-first-poll
-  // does not flicker into the offline list.
-  if (f['f-status'] === 'online' && d.online !== true) return false;
-  if (f['f-status'] === 'offline' && d.online !== false) return false;
-  if (f['f-kind'] && d.kind !== f['f-kind']) return false;
-  if (f['f-version'] && d.version_status !== f['f-version']) return false;
-  if (f['f-webview'] === 'behind' && !webviewBehind(d)) return false;
   return true;
+}
+function renderFilters(all) {
+  $('filter-sections').innerHTML = SECTIONS.map((sec) => {
+    const pool = all.filter((d) => matches(d, sec.key));
+    const counts = new Map();
+    for (const d of pool) for (const v of sec.of(d)) counts.set(v, (counts.get(v) || 0) + 1);
+    // A value nobody has any more still shows while it is ticked, so a filter
+    // can always be unticked from where it was set.
+    for (const v of picked[sec.key] || []) if (!counts.has(v)) counts.set(v, 0);
+    const chosen = picked[sec.key] ? picked[sec.key].size : 0;
+    const opts = [...counts.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(b[0]));
+    const body = opts.length
+      ? opts.map(([v, n]) => `<label class="opt"><input type="checkbox" data-sec="${esc(sec.key)}" value="${esc(v)}"${
+          picked[sec.key] && picked[sec.key].has(v) ? ' checked' : ''}><span>${esc(v)}</span><span class="n">${n}</span></label>`).join('')
+      : '<div class="opt none">Nothing to filter by</div>';
+    return `<details${chosen ? ' open' : ''}><summary>${esc(sec.label)}${
+      chosen ? ` <span class="chip">${chosen}</span>` : ''}</summary><div>${body}</div></details>`;
+  }).join('');
 }
 function render(data) {
   last = data;
   const all = data.devices;
-  fleetWebview = all.map((d) => d.webview).filter(Boolean)
-    .sort((a, b) => (major(b) || 0) - (major(a) || 0))[0] || null;
-  const ds = all.filter(matches);
+  fleetWebviews = all.filter((d) => major(d.webview) != null)
+    .map((d) => ({ major: major(d.webview), api: d.android_api ?? null }));
+  const ds = all.filter((d) => matches(d));
   const filtered = ds.length !== all.length;
-  $('clear').hidden = !filtered && !filterState().q;
+  renderFilters(all);
+  const active = activeCount();
+  $('filter-count').textContent = active;
+  $('filter-count').hidden = !active;
+  $('clear').hidden = !active && !$('q').value;
   const online = all.filter((d) => d.online).length;
   const outdated = all.filter((d) => d.version_status === 'outdated').length;
   const latest = Object.entries(data.latest || {})
@@ -430,14 +514,33 @@ $('rows').addEventListener('click', (e) => {
     if (last) render(last);
   }
 });
-for (const id of FILTERS) {
-  $(id).addEventListener('input', () => { saveFilters(); if (last) render(last); });
-}
-$('clear').addEventListener('click', () => {
-  for (const id of FILTERS) $(id).value = '';
+$('q').addEventListener('input', () => { saveFilters(); if (last) render(last); });
+$('filter-sections').addEventListener('change', (e) => {
+  const box = e.target.closest('input[data-sec]');
+  if (!box) return;
+  const set = picked[box.dataset.sec] || (picked[box.dataset.sec] = new Set());
+  box.checked ? set.add(box.value) : set.delete(box.value);
   saveFilters();
   if (last) render(last);
 });
+$('clear').addEventListener('click', () => {
+  picked = {};
+  $('q').value = '';
+  saveFilters();
+  if (last) render(last);
+});
+// The dropdown closes on a click outside it or on Escape, like every other
+// menu; clicks inside must not close it, since ticking is what it is for.
+const pop = $('filter-pop'), btn = $('filter-btn');
+function setPop(open) {
+  pop.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+btn.addEventListener('click', () => setPop(pop.hidden));
+document.addEventListener('click', (e) => {
+  if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) setPop(false);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPop(false); });
 loadFilters();
 load();
 setInterval(load, 15000);

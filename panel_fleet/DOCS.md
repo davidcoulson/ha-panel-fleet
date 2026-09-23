@@ -8,11 +8,11 @@ Panel Fleet finds the wall panels on your network and lists them in one place.
 | --- | --- |
 | **Status** | Each panel's health endpoint, polled every scan interval. A panel reads offline after three missed polls in a row, and stays listed with when it was last seen. |
 | **Panel** | Name, the panel's `.local` address, and which software it runs. |
-| **Platform** | Model, Android version and the system WebView. A WebView older than the best-updated panel in the fleet is marked. |
+| **Platform** | Model, Android version and the system WebView. A WebView is marked only when another panel on the same Android version or older runs a newer one — Chrome and the WebView stop shipping for old Android (8.1 ends at WebView 138), and a panel at the end of its road is not behind. |
 | **Display** | Size, orientation, dpi, and by how much the display is turned when it is not upright. |
 | **Network** | Ethernet, or Wi-Fi with its band, channel, signal and link speed, and the address the panel answers on. |
 
-Filters above the table narrow the list by name, model, address, version or dashboard, and by status, software, version and whether the panel's WebView is behind the rest of the fleet. They are remembered in the browser, and the summary says how many of the fleet are shown.
+A search box narrows the list by name, model, address, version, WebView or dashboard. **Filters** opens one dropdown with a section per question — Status, Software, Platform, Android, Network and Needs attention — each listing the values the fleet actually has, with how many panels have each. Ticking several values inside a section widens the list; ticking across sections narrows it. The counts are measured against the other sections' filters, so a count says what ticking it would give. Filters are remembered in the browser, and the summary says how many of the fleet are shown.
 | **Details** (the chevron at the end of a row) | Everything the panel reports: display and dpi, Android version, API level and build, WebView package, network, memory, storage, CPU, how long the device has been up beside how long the app has, and battery where there is one. |
 | **Version** | The installed app version, compared with the latest GitHub release of [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite/releases) or [ha-paneld](https://github.com/maxlyth/ha-paneld/releases). A fork build such as `2026.9.74-djc-…` is compared by the release it is built on. |
 | **Dashboard** | For Kiosk Satellite, its **Current page** sensor in Home Assistant, matched to the panel by its IPv4 address sensor. For ha-paneld, the page it reports, or its home dashboard. |
