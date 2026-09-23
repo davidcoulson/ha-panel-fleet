@@ -126,6 +126,7 @@
 <main>
   <header>
     <h1>Panel Fleet</h1>
+    <span class="chip" id="version" hidden></span>
     <div class="summary" id="summary"></div>
     <div class="spacer"></div>
     <button id="scan" type="button">Scan now</button>
@@ -302,6 +303,9 @@ function render(data) {
     `<span><b>${online}</b> online</span>` +
     `<span class="${outdated ? 'warn' : ''}"><b>${outdated}</b> need an update</span>` +
     (latest ? `<span>Latest: ${latest}</span>` : '');
+  const v = $('version');
+  v.textContent = data.version ? 'v' + data.version : '';
+  v.hidden = !data.version;
   $('note').textContent = data.ha_error ? `Pages shown need Home Assistant (${data.ha_error}).` : '';
   $('note').className = 'note' + (data.ha_error ? ' err' : '');
   $('rows').innerHTML = ds.length

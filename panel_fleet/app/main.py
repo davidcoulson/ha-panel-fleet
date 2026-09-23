@@ -60,6 +60,9 @@ RELEASE_REPOS = {
 
 OFFLINE_AFTER = 3  # failed polls in a row before a panel reads offline
 
+# This add-on's own version, baked in by the build (Supervisor's BUILD_VERSION).
+ADDON_VERSION = os.environ.get("ADDON_VERSION") or None
+
 
 # ── Versions ──────────────────────────────────────────────────────────
 
@@ -485,6 +488,7 @@ async def api_devices(request):
                    key=lambda x: (not x.get("online"), (x.get("name") or x["id"]).lower()))
     return web.json_response({
         "devices": items,
+        "version": ADDON_VERSION,
         "latest": fleet.latest,
         "ha_error": fleet.ha_error,
         "scan_interval": SCAN_INTERVAL,
@@ -508,7 +512,10 @@ async def api_forget(request):
 
 
 async def index(request):
-    return web.FileResponse(HERE / "index.html")
+    # Never cached: the sidebar keeps this page in a long-lived frame, so a
+    # cached copy outlives several add-on updates and looks like an update
+    # that did not take.
+    return web.FileResponse(HERE / "index.html", headers={"Cache-Control": "no-store"})
 
 
 # Ingress is the only way in: the Supervisor's proxy address, or anything

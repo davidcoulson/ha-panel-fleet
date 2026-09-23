@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8
+
+- The add-on's own version sits beside the title, so a stale page can be told from an update that did not take.
+- The page itself is no longer cached. The sidebar holds it in a long-lived frame, where a cached copy could outlive several updates.
+
 ## 0.1.7
 
 - Display and Network are columns of their own. The panel column keeps the name, model, Android version and WebView; the address moved under Network, beside how the panel reaches it.
