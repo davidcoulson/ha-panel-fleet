@@ -67,7 +67,7 @@
   .note.err { color: var(--bad); }
 
   .table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; min-width: 860px; }
+  table { width: 100%; border-collapse: collapse; min-width: 1040px; }
   th {
     text-align: left; font-weight: 500; font-size: 12px; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -137,13 +137,14 @@
         <tr>
           <th>Status</th>
           <th>Panel</th>
+          <th>Display</th>
+          <th>Network</th>
           <th>Version</th>
           <th>Showing</th>
-          <th>Address</th>
           <th></th>
         </tr>
       </thead>
-      <tbody id="rows"><tr><td colspan="6" class="empty">Looking for panels…</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="7" class="empty">Looking for panels…</td></tr></tbody>
     </table>
   </div>
 </main>
@@ -165,12 +166,6 @@ function duration(s) {
   if (s < 3600) return Math.round(s / 60) + ' min';
   if (s < 172800) return Math.round(s / 3600) + ' h';
   return Math.round(s / 86400) + ' days';
-}
-function screenText(d) {
-  const s = d.screen;
-  if (!s) return '';
-  const turn = s.rotation ? `, turned ${s.rotation}\u00b0` : '';
-  return `${s.width}\u00d7${s.height} \u00b7 ${s.orientation || ''}${turn}`;
 }
 // The WebView the fleet's best-updated panel runs, so a panel left behind
 // can be told from one that is simply on the version everybody is on.
@@ -195,26 +190,33 @@ function channel(mhz) {
   if (mhz >= 5955 && mhz <= 7115) return { band: '6 GHz', ch: (mhz - 5950) / 5 };
   return null;
 }
-function linkText(d) {
-  const l = d.link;
-  if (!l || !l.type) return '';
-  const name = { ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[l.type] || l.type;
-  if (l.type !== 'wifi') return name;
+function displayCell(d) {
+  const s = d.screen;
+  if (!s) return '<span class="sub">unknown</span>';
+  const under = [s.orientation, s.dpi ? `${s.dpi} dpi` : '', s.rotation ? `turned ${s.rotation}\u00b0` : '']
+    .filter(Boolean).join(' \u00b7 ');
+  return `<div class="mono">${s.width}\u00d7${s.height}</div>` +
+    (under ? `<div class="sub">${esc(under)}</div>` : '');
+}
+function networkCell(d) {
+  const l = d.link || {};
   const c = channel(l.frequencyMhz);
-  return [
-    name + (c ? ` ${c.band}` : ''),
-    c ? `ch ${c.ch}` : '',
-    l.rssi != null ? `${l.rssi} dBm` : '',
-    l.speedMbps ? `${l.speedMbps} Mbps` : '',
-  ].filter(Boolean).join(' \u00b7 ');
+  const name = { ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[l.type] || '';
+  const radio = l.type === 'wifi'
+    ? [l.rssi != null ? `${l.rssi} dBm` : '', l.speedMbps ? `${l.speedMbps} Mbps` : ''].filter(Boolean).join(' \u00b7 ')
+    : '';
+  // Band on the first line with the medium, channel down with the numbers:
+  // "Wi-Fi 2.4 GHz" wrapped mid-phrase when the channel rode along with it.
+  const under = [c ? `ch ${c.ch}` : '', radio].filter(Boolean).join(' \u00b7 ');
+  return (name ? `<div>${esc(name)}${c ? ` ${esc(c.band)}` : ''}</div>` : '') +
+    (under ? `<div class="sub">${esc(under)}</div>` : '') +
+    `<div class="sub mono">${esc(d.host || '')}${d.hostname ? ` \u00b7 ${esc(d.hostname)}.local` : ''}</div>`;
 }
 function detailRow(d) {
   const rows = [
-    ['Display', [screenText(d), d.screen && d.screen.dpi ? `${d.screen.dpi} dpi` : ''].filter(Boolean).join(' \u00b7 ')],
     ['Android', [d.android, d.android_api ? `API ${d.android_api}` : ''].filter(Boolean).join(' \u00b7 '),
       d.android_build],
     ['System WebView', d.webview ? `${d.webview}` : '', d.webview_package],
-    ['Network', linkText(d), d.hostname ? d.hostname + '.local' : ''],
     ['Memory', d.ram_text || ''],
     ['Storage', d.storage_text || ''],
     ['CPU', d.cpu_text || ''],
@@ -222,7 +224,7 @@ function detailRow(d) {
       d.uptime != null ? `app up ${duration(d.uptime)}` : ''],
     ['Battery', d.battery != null ? `${d.battery}%${d.charging ? ' \u00b7 charging' : ''}` : ''],
   ].filter(([, value]) => value);
-  return `<tr class="detail" data-detail="${esc(d.key)}"><td colspan="6"><dl class="grid">` +
+  return `<tr class="detail" data-detail="${esc(d.key)}"><td colspan="7"><dl class="grid">` +
     rows.map(([label, value, sub]) =>
       `<div><dt>${esc(label)}</dt><dd>${esc(value)}${sub ? `<span class="sub mono">${esc(sub)}</span>` : ''}</dd></div>`).join('') +
     '</dl></td></tr>';
@@ -261,7 +263,7 @@ function row(d, now) {
   const on = d.online !== false;
   const status = statusCell(d, now);
   const model = [d.model, d.android].filter(Boolean).join(' · ');
-  const facts = [screenText(d), webviewText(d), linkText(d)].filter(Boolean).join(' · ');
+  const facts = webviewText(d);
   return `<tr class="${on ? '' : 'offline'}">
     <td>${status}</td>
     <td><div class="name">${esc(d.name || d.id)}${d.admin
@@ -270,9 +272,10 @@ function row(d, now) {
         <div class="sub">${esc(model)}</div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
         <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span></div></td>
+    <td>${displayCell(d)}</td>
+    <td>${networkCell(d)}</td>
     <td>${versionCell(d)}</td>
     <td>${pageCell(d)}</td>
-    <td><div class="mono">${esc(d.host || '')}</div>${d.hostname ? `<div class="sub mono">${esc(d.hostname)}.local</div>` : ''}</td>
     <td class="actions">
       ${d.online !== false ? '' : `<button type="button" data-forget="${esc(d.key)}" title="Remove until it is discovered again">Forget</button>`}
       <button type="button" class="more" data-more="${esc(d.key)}" aria-expanded="false"
@@ -303,7 +306,7 @@ function render(data) {
   $('note').className = 'note' + (data.ha_error ? ' err' : '');
   $('rows').innerHTML = ds.length
     ? ds.map((d) => row(d, data.now)).join('')
-    : '<tr><td colspan="6" class="empty">No panels found yet. Kiosk Satellite panels announce themselves when their remote admin is on.</td></tr>';
+    : '<tr><td colspan="7" class="empty">No panels found yet. Kiosk Satellite panels announce themselves when their remote admin is on.</td></tr>';
 }
 async function load(path = 'api/devices', init) {
   try {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Display and Network are columns of their own. The panel column keeps the name, model, Android version and WebView; the address moved under Network, beside how the panel reaches it.
+
 ## 0.1.6
 
 - A Wi-Fi panel says which band and channel it is on: "Wi-Fi 5 GHz · ch 60 · −45 dBm · 432 Mbps". Needs Kiosk Satellite build `2026.9.77-djc-2026.09.22.09` or newer.
