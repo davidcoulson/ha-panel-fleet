@@ -50,7 +50,9 @@
     color: var(--ink);
     font: 14px/1.45 Roboto, "Segoe UI", system-ui, -apple-system, sans-serif;
   }
-  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
+  /* Wide enough for the table to fit without a sideways scroll that hides
+     the last column. */
+  main { max-width: 1480px; margin: 0 auto; padding: 20px 16px 40px; }
   header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; margin-bottom: 16px; }
   h1 { font-size: 22px; font-weight: 500; margin: 0; letter-spacing: -0.01em; }
   .summary { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -143,7 +145,14 @@
   .badge.ahead, .badge.unknown { background: var(--chip); color: var(--muted); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .page { max-width: 260px; overflow-wrap: anywhere; }
+  /* A version, a hostname and a dashboard path are each one string: broken
+     over two lines they read as two. Long paths end in an ellipsis with the
+     whole thing in the title. */
+  .nowrap { white-space: nowrap; }
+  .page {
+    display: inline-block; max-width: 250px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;
+  }
   .actions { white-space: nowrap; text-align: right; }
   .open {
     display: inline-flex; vertical-align: -3px; margin-left: 6px;
@@ -280,7 +289,7 @@ function channel(mhz) {
 function displayCell(d) {
   const s = d.screen;
   if (!s) return '<span class="sub">unknown</span>';
-  const under = [s.orientation, s.dpi ? `${s.dpi} dpi` : '', s.rotation ? `turned ${s.rotation}\u00b0` : '']
+  const under = [s.orientation, s.rotation ? `turned ${s.rotation}\u00b0` : '']
     .filter(Boolean).join(' \u00b7 ');
   return `<div class="mono">${s.width}\u00d7${s.height}</div>` +
     (under ? `<div class="sub">${esc(under)}</div>` : '');
@@ -292,15 +301,19 @@ function networkCell(d) {
   const radio = l.type === 'wifi'
     ? [l.rssi != null ? `${l.rssi} dBm` : '', l.speedMbps ? `${l.speedMbps} Mbps` : ''].filter(Boolean).join(' \u00b7 ')
     : '';
+  // Channel, signal and speed read as one measurement, so they stay on one line.
   // Band on the first line with the medium, channel down with the numbers:
   // "Wi-Fi 2.4 GHz" wrapped mid-phrase when the channel rode along with it.
   const under = [c ? `ch ${c.ch}` : '', radio].filter(Boolean).join(' \u00b7 ');
   return (name ? `<div>${esc(name)}${c ? ` ${esc(c.band)}` : ''}</div>` : '') +
-    (under ? `<div class="sub">${esc(under)}</div>` : '') +
+    (under ? `<div class="sub nowrap">${esc(under)}</div>` : '') +
     `<div class="sub mono">${esc(d.host || '')}</div>`;
 }
 function detailRow(d) {
   const rows = [
+    ['Display', [d.screen ? `${d.screen.width}\u00d7${d.screen.height}` : '',
+      d.screen && d.screen.orientation, d.screen && d.screen.dpi ? `${d.screen.dpi} dpi` : '',
+      d.screen && d.screen.rotation ? `turned ${d.screen.rotation}\u00b0` : ''].filter(Boolean).join(' \u00b7 ')],
     ['Android', [d.android, d.android_api ? `API ${d.android_api}` : ''].filter(Boolean).join(' \u00b7 '),
       d.android_build],
     ['System WebView', d.webview ? `${d.webview}` : '', d.webview_package],
@@ -325,8 +338,8 @@ function versionCell(d) {
     ahead: 'Newer than release',
     unknown: 'Latest unknown',
   }[d.version_status];
-  return `<div class="mono">${esc(base)}</div>` +
-    (d.fork ? `<div class="sub mono" title="Fork build">${esc(d.fork.replace(/^-/, ''))}</div>` : '') +
+  return `<div class="mono nowrap">${esc(base)}</div>` +
+    (d.fork ? `<div class="sub mono nowrap" title="Fork build">${esc(d.fork.replace(/^-/, ''))}</div>` : '') +
     `<div style="margin-top:4px"><span class="badge ${d.version_status}">${label}</span></div>`;
 }
 function pageCell(d) {
@@ -335,7 +348,7 @@ function pageCell(d) {
   const href = d.dashboard_href.startsWith('/') ? new URL(d.dashboard_href, location.origin).href : d.dashboard_href;
   const home = d.kind === 'paneld' && d.home_dashboard && d.home_dashboard !== d.dashboard_path
     ? `<div class="sub">home <span class="mono">${esc(d.home_dashboard)}</span></div>` : '';
-  return `<a class="page mono" href="${esc(href)}" target="_blank" rel="noopener">${esc(d.dashboard_path)}</a>${home}`;
+  return `<a class="page mono" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(d.dashboard_href)}">${esc(d.dashboard_path)}</a>${home}`;
 }
 function statusCell(d, now) {
   if (d.online == null) return '<div class="status"><span class="dot"></span>Checking…</div>';

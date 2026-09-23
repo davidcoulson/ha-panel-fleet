@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.2.1
+## 0.2.2
 
-- The `.local` name under a panel no longer wraps.
+- Nothing that is one string wraps any more: the `.local` name, the version and its fork build, and the Wi-Fi channel/signal/speed each stay on their own line. A long dashboard path ends in an ellipsis with the whole path in its tooltip.
+- The page is wider, so the table no longer scrolls sideways and hides the details chevron. Screen dpi moved from the Display column into the details, where it does not cost a column its width.
 
 ## 0.2.0
 
