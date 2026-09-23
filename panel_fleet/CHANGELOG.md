@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9
+
+- **Platform** is a column of its own: model, Android version and the system WebView. The panel column keeps the name, the `.local` address under it, and which software it runs.
+- **Showing** is now **Dashboard**.
+- Filters above the table: a search over name, model, address, version and dashboard, plus status, software, version and "WebView behind the fleet". They are remembered per browser, and the summary says how many of the fleet are shown.
+
 ## 0.1.8
 
 - The add-on's own version sits beside the title, so a stale page can be told from an update that did not take.

@@ -1,5 +1,5 @@
 name: Panel Fleet
-version: "0.1.8"
+version: "0.1.9"
 slug: panel_fleet
 description: See every Kiosk Satellite and ha-paneld wall panel on the network, whether it is online and up to date, and what it is showing.
 url: https://github.com/davidcoulson/ha-panel-fleet
