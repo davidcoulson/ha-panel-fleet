@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- The `.local` name under a panel no longer wraps.
+
 ## 0.2.0
 
 - The filters are one dropdown, laid out like the ESPHome dashboard's: a search box on its own, then **Filters** with a section per question — Status, Software, Platform, Android, Network and Needs attention — each listing the values the fleet actually has, with counts. Tick several inside a section to widen, across sections to narrow.

@@ -125,6 +125,9 @@
   /* The name and its open-in-new icon are one line: the icon dropping to a
      line of its own read as a second, empty row. */
   .name { font-weight: 500; color: var(--ink); white-space: nowrap; }
+  /* Same for the .local name under it: a hostname broken across two lines
+     is no longer a hostname you can read off the screen. */
+  .hostname { white-space: nowrap; }
   .sub { color: var(--muted); font-size: 12.5px; }
   .mono { font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
   .status { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
@@ -352,7 +355,7 @@ function row(d, now) {
     <td><div class="name">${esc(d.name || d.id)}${d.admin
           ? `<a class="open" href="${esc(d.admin)}" target="_blank" rel="noopener" title="Open the admin page" aria-label="Open the admin page for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7Z"/></svg></a>`
           : ''}</div>
-        ${d.hostname ? `<div class="sub mono">${esc(d.hostname)}.local</div>` : ''}
+        ${d.hostname ? `<div class="sub mono hostname">${esc(d.hostname)}.local</div>` : ''}
         <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span></div></td>
     <td><div>${esc(platform)}</div>${webviewText(d) ? `<div class="facts">${webviewText(d)}</div>` : ''}</td>
     <td>${displayCell(d)}</td>
