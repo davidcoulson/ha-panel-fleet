@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5
+
+- Every panel row now carries its display (size, orientation and, when it is turned, by how much), its system WebView and how it is on the network — Ethernet, or Wi-Fi with signal and link speed.
+- A WebView older than the best-updated panel in the fleet is marked, so the odd panel rendering a dashboard differently is one glance away.
+- The chevron at the end of a row opens everything a panel reports: display and dpi, Android version, API level and build, WebView package, network, memory, storage, CPU, how long the device has been up beside the app, and battery where there is one.
+- Kiosk Satellite panels need build 2026.9.77-djc-2026.09.22.07 or newer for the WebView, network and device-uptime rows; ha-paneld reports its own from its info page.
+
 ## 0.1.4
 
 - Sidebar icon is now `mdi:monitor-dashboard`, so it is not mistaken for Panel Assistant's `mdi:tablet-dashboard`.

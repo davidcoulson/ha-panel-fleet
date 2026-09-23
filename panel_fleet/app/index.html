@@ -102,6 +102,23 @@
   .open svg { width: 17px; height: 17px; fill: currentColor; }
   .actions button { padding: 3px 9px; font-size: 12.5px; color: var(--muted); }
   .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+  .facts { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .facts .lag { color: var(--warn); }
+  tr.detail > td { padding: 0 14px 16px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px 22px; background: var(--chip); border-radius: 8px; padding: 14px 16px;
+  }
+  .grid dt {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); margin-bottom: 2px;
+  }
+  .grid dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+  .grid dd .sub { display: block; }
+  .more { color: var(--muted); }
+  .more[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .more svg { width: 16px; height: 16px; fill: currentColor; vertical-align: -3px; transition: transform 0.15s; }
+  @media (prefers-reduced-motion: reduce) { .more svg { transition: none; } }
   @media (prefers-reduced-motion: no-preference) { .dot { transition: background 0.3s; } }
 </style>
 </head>
@@ -149,6 +166,49 @@ function duration(s) {
   if (s < 172800) return Math.round(s / 3600) + ' h';
   return Math.round(s / 86400) + ' days';
 }
+function screenText(d) {
+  const s = d.screen;
+  if (!s) return '';
+  const turn = s.rotation ? `, turned ${s.rotation}\u00b0` : '';
+  return `${s.width}\u00d7${s.height} \u00b7 ${s.orientation || ''}${turn}`;
+}
+// The WebView the fleet's best-updated panel runs, so a panel left behind
+// can be told from one that is simply on the version everybody is on.
+let fleetWebview = null;
+function major(v) { const n = parseInt(String(v || ''), 10); return Number.isFinite(n) ? n : null; }
+function webviewText(d) {
+  if (!d.webview) return '';
+  const mine = major(d.webview), best = major(fleetWebview);
+  const behind = mine != null && best != null && mine < best;
+  return `<span class="${behind ? 'lag' : ''}" title="${esc(d.webview_package || '')} ${esc(d.webview)}${
+    behind ? ` \u2014 the fleet is on ${esc(fleetWebview)}` : ''}">WebView ${esc(String(mine ?? d.webview))}${behind ? ' \u2193' : ''}</span>`;
+}
+function linkText(d) {
+  const l = d.link;
+  if (!l || !l.type) return '';
+  const name = { ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[l.type] || l.type;
+  if (l.type !== 'wifi') return name;
+  return name + (l.rssi != null ? ` ${l.rssi} dBm` : '') + (l.speedMbps ? ` \u00b7 ${l.speedMbps} Mbps` : '');
+}
+function detailRow(d) {
+  const rows = [
+    ['Display', [screenText(d), d.screen && d.screen.dpi ? `${d.screen.dpi} dpi` : ''].filter(Boolean).join(' \u00b7 ')],
+    ['Android', [d.android, d.android_api ? `API ${d.android_api}` : ''].filter(Boolean).join(' \u00b7 '),
+      d.android_build],
+    ['System WebView', d.webview ? `${d.webview}` : '', d.webview_package],
+    ['Network', linkText(d), d.hostname ? d.hostname + '.local' : ''],
+    ['Memory', d.ram_text || ''],
+    ['Storage', d.storage_text || ''],
+    ['CPU', d.cpu_text || ''],
+    ['Uptime', d.uptime_device != null ? `device up ${duration(d.uptime_device)}` : '',
+      d.uptime != null ? `app up ${duration(d.uptime)}` : ''],
+    ['Battery', d.battery != null ? `${d.battery}%${d.charging ? ' \u00b7 charging' : ''}` : ''],
+  ].filter(([, value]) => value);
+  return `<tr class="detail" data-detail="${esc(d.key)}"><td colspan="6"><dl class="grid">` +
+    rows.map(([label, value, sub]) =>
+      `<div><dt>${esc(label)}</dt><dd>${esc(value)}${sub ? `<span class="sub mono">${esc(sub)}</span>` : ''}</dd></div>`).join('') +
+    '</dl></td></tr>';
+}
 function versionCell(d) {
   if (!d.version) return '<span class="sub">unknown</span>';
   const base = d.fork ? d.version.slice(0, d.version.length - d.fork.length) : d.version;
@@ -183,23 +243,34 @@ function row(d, now) {
   const on = d.online !== false;
   const status = statusCell(d, now);
   const model = [d.model, d.android].filter(Boolean).join(' · ');
+  const facts = [screenText(d), webviewText(d), linkText(d)].filter(Boolean).join(' · ');
   return `<tr class="${on ? '' : 'offline'}">
     <td>${status}</td>
     <td><div class="name">${esc(d.name || d.id)}${d.admin
           ? `<a class="open" href="${esc(d.admin)}" target="_blank" rel="noopener" title="Open the admin page" aria-label="Open the admin page for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7Z"/></svg></a>`
           : ''}</div>
         <div class="sub">${esc(model)}</div>
+        ${facts ? `<div class="facts">${facts}</div>` : ''}
         <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span></div></td>
     <td>${versionCell(d)}</td>
     <td>${pageCell(d)}</td>
     <td><div class="mono">${esc(d.host || '')}</div>${d.hostname ? `<div class="sub mono">${esc(d.hostname)}.local</div>` : ''}</td>
     <td class="actions">
       ${d.online !== false ? '' : `<button type="button" data-forget="${esc(d.key)}" title="Remove until it is discovered again">Forget</button>`}
+      <button type="button" class="more" data-more="${esc(d.key)}" aria-expanded="false"
+        title="Everything this panel reports" aria-label="Details for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6 1.4-1.4Z"/></svg></button>
     </td>
-  </tr>`;
+  </tr>` + (open.has(d.key) ? detailRow(d) : '');
 }
+// Which panels are expanded, kept across the fifteen-second refresh so a
+// detail being read does not fold itself up mid-sentence.
+const open = new Set();
+let last = null;
 function render(data) {
+  last = data;
   const ds = data.devices;
+  fleetWebview = ds.map((d) => d.webview).filter(Boolean)
+    .sort((a, b) => (major(b) || 0) - (major(a) || 0))[0] || null;
   const online = ds.filter((d) => d.online).length;
   const outdated = ds.filter((d) => d.version_status === 'outdated').length;
   const latest = Object.entries(data.latest || {})
@@ -233,8 +304,18 @@ $('scan').addEventListener('click', async (e) => {
   e.target.textContent = 'Scan now';
 });
 $('rows').addEventListener('click', (e) => {
-  const key = e.target.dataset.forget;
-  if (key) load('api/devices/' + encodeURIComponent(key), { method: 'DELETE' });
+  const forget = e.target.closest('[data-forget]');
+  if (forget) {
+    open.delete(forget.dataset.forget);
+    load('api/devices/' + encodeURIComponent(forget.dataset.forget), { method: 'DELETE' });
+    return;
+  }
+  const more = e.target.closest('[data-more]');
+  if (more) {
+    const key = more.dataset.more;
+    open.has(key) ? open.delete(key) : open.add(key);
+    if (last) render(last);
+  }
 });
 load();
 setInterval(load, 15000);

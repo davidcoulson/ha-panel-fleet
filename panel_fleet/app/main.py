@@ -209,17 +209,58 @@ def _model(brand, model):
     return " ".join(x for x in (brand, model) if x)
 
 
+def _gb(n):
+    """Bytes as '4.1 GB', the way a panel's own admin writes it."""
+    if not isinstance(n, (int, float)):
+        return None
+    return f"{n / 1_000_000_000:.1f} GB"
+
+
+def _ks_screen(h):
+    s = h.get("screen") or {}
+    w, ht = s.get("width"), s.get("height")
+    if not (w and ht):
+        return None
+    out = {"width": w, "height": ht}
+    # Older builds (and upstream) answer size alone: infer what they imply
+    # rather than leaving the row blank, and take the rest when it is there.
+    out["orientation"] = s.get("orientation") or ("portrait" if ht > w else "landscape")
+    if isinstance(s.get("density"), (int, float)):
+        out["dpi"] = round(s["density"] * 160)
+    if isinstance(s.get("rotation"), int):
+        out["rotation"] = s["rotation"]
+    return out
+
+
 async def _poll_ks(session, d):
     async with session.get(f"http://{d['host']}:{d.get('port', 2324)}/api/health") as r:
         r.raise_for_status()
         h = await r.json(content_type=None)
+    up = h.get("uptime") if isinstance(h.get("uptime"), dict) else {}
+    wv = h.get("webview") or {}
+    ram, storage = h.get("ram") or {}, h.get("storage") or {}
+    cpu = h.get("cpu") or {}
     return {
         "name": h.get("name"),
         "version": h.get("appVersion"),
         "model": _model(h.get("brand"), h.get("model")),
         "android": h.get("androidVersion"),
+        "android_api": h.get("sdkInt"),
+        "android_build": h.get("androidBuild"),
         "screen_on": h.get("screenOn"),
         "uptime": _uptime_seconds(h.get("uptime")),
+        "uptime_device": up.get("device"),
+        "screen": _ks_screen(h),
+        "webview": wv.get("version"),
+        "webview_package": wv.get("package"),
+        "link": h.get("link") or None,
+        "ram_text": f"{_gb(ram.get('free'))} free of {_gb(ram.get('total'))}"
+        if ram.get("total") else None,
+        "storage_text": f"{_gb(storage.get('free'))} free of {_gb(storage.get('total'))}"
+        if storage.get("total") else None,
+        "cpu_text": f"{round(cpu['usage'])}%" + (f" · {round(cpu['temp'])} °C" if cpu.get("temp") else "")
+        if isinstance(cpu.get("usage"), (int, float)) else None,
+        "battery": h.get("battery"),
         "host": h.get("ip") or d["host"],
     }
 
@@ -236,6 +277,25 @@ def _cells(html):
     return out
 
 
+def _paneld_screen(text):
+    """'1334×750 px · logical 250 dpi' as the same shape /api/health gives."""
+    m = re.search(r"(\d+)\s*[×x]\s*(\d+)", text or "")
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    out = {"width": w, "height": h, "orientation": "portrait" if h > w else "landscape"}
+    dpi = re.search(r"(\d+)\s*dpi", text or "")
+    if dpi:
+        out["dpi"] = int(dpi.group(1))
+    return out
+
+
+def _paneld_webview(text):
+    """'com.android.webview 138.0.7204.63' as (package, version)."""
+    m = re.match(r"\s*(\S+)\s+(\S+)", text or "")
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
 async def _poll_paneld(session, d):
     base = f"http://{d['host']}:{d.get('port', 8888)}"
     async with session.get(f"{base}/api/v1/health") as r:
@@ -249,13 +309,26 @@ async def _poll_paneld(session, d):
                 for html in (info.get("cards") or {}).values():
                     rows.update(_cells(html))
                 android = rows.get("Android", "").split(" (")[0]
+                api = re.search(r"API (\d+)", rows.get("Android", ""))
+                wv_package, wv_version = _paneld_webview(rows.get("System WebView"))
                 out = {
                     "name": rows.get("Friendly name"),
                     "version": rows.get("ha-paneld", "").split(" (")[0] or None,
                     "model": rows.get("Model") or rows.get("Platform"),
                     "android": f"Android {android}" if android else None,
+                    "android_api": int(api.group(1)) if api else None,
+                    "android_build": rows.get("Firmware"),
                     "home_dashboard": rows.get("Home dashboard"),
                     "dashboard_path_now": rows.get("Navigate"),
+                    # ha-paneld writes these for its own web UI, in its own
+                    # words: take the numbers where the shape is fixed and
+                    # keep the rest as the sentence it already wrote.
+                    "screen": _paneld_screen(rows.get("Display")),
+                    "webview": wv_version,
+                    "webview_package": wv_package,
+                    "cpu_text": rows.get("CPU"),
+                    "ram_text": rows.get("RAM"),
+                    "storage_text": rows.get("Storage"),
                 }
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
         pass
