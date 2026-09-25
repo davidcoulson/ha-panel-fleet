@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- A Kiosk Satellite running in agent mode is tagged **Agent** (from its mDNS record), and its Display and Dashboard columns read "—": an agent shows no dashboard, so its screen size is not a fact about one. Everything else — version, network, platform, uptime, the details drawer — is unchanged, because that is exactly what an agent is there to report.
+- Needs Kiosk Satellite build `2026.9.81-djc-2026.09.25.08` or newer, which is what advertises `agent=1`.
+
 ## 0.2.2
 
 - Nothing that is one string wraps any more: the `.local` name, the version and its fork build, and the Wi-Fi channel/signal/speed each stay on their own line. A long dashboard path ends in an ellipsis with the whole path in its tooltip.

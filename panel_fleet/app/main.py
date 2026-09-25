@@ -172,8 +172,12 @@ async def _resolve(zc, service_type, name):
     if kind == "ks":
         ident = txt.get("id") or instance.removeprefix("ks-")
         port = int(txt.get("port") or info.port or 2324)
+        # agent=1: a Kiosk Satellite running as a management agent - no
+        # dashboard, no voice, no screensaver. It is a different kind of
+        # thing in this list, not a panel that happens to be idle.
         fleet.upsert(kind, ident, name=txt.get("name"), host=addresses[0], port=port,
-                     version=txt.get("version"), hostname=txt.get("host"))
+                     version=txt.get("version"), hostname=txt.get("host"),
+                     agent=txt.get("agent") == "1")
     else:
         ident = txt.get("did") or instance
         fleet.upsert(kind, ident, name=txt.get("name") or instance, host=addresses[0],

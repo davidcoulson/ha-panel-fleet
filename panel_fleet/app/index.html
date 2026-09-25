@@ -139,6 +139,7 @@
     display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
     background: var(--chip); color: var(--muted); white-space: nowrap; vertical-align: 1px;
   }
+  .chip.agent { margin-left: 5px; background: var(--good-bg); color: var(--good); }
   .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
   .badge.current { background: var(--good-bg); color: var(--good); }
   .badge.outdated { background: var(--warn-bg); color: var(--warn); }
@@ -287,6 +288,10 @@ function channel(mhz) {
   return null;
 }
 function displayCell(d) {
+  // An agent's screen shows whatever that box shows - a projector's own
+  // launcher, usually. Its size is not a fact about the panel's dashboard,
+  // because there isn't one.
+  if (d.agent) return '<span class="sub">—</span>';
   const s = d.screen;
   if (!s) return '<span class="sub">unknown</span>';
   const under = [s.orientation, s.rotation ? `turned ${s.rotation}\u00b0` : '']
@@ -343,6 +348,7 @@ function versionCell(d) {
     `<div style="margin-top:4px"><span class="badge ${d.version_status}">${label}</span></div>`;
 }
 function pageCell(d) {
+  if (d.agent) return '<span class="sub" title="An agent shows no dashboard">—</span>';
   if (!d.dashboard_href) return '<span class="sub">not reported</span>';
   // A bare path is a Home Assistant page: open it on Home Assistant's own origin.
   const href = d.dashboard_href.startsWith('/') ? new URL(d.dashboard_href, location.origin).href : d.dashboard_href;
@@ -369,7 +375,8 @@ function row(d, now) {
           ? `<a class="open" href="${esc(d.admin)}" target="_blank" rel="noopener" title="Open the admin page" aria-label="Open the admin page for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7Z"/></svg></a>`
           : ''}</div>
         ${d.hostname ? `<div class="sub mono hostname">${esc(d.hostname)}.local</div>` : ''}
-        <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span></div></td>
+        <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span>${
+          d.agent ? '<span class="chip agent" title="Runs as a management agent: no dashboard, voice or screensaver">Agent</span>' : ''}</div></td>
     <td><div>${esc(platform)}</div>${webviewText(d) ? `<div class="facts">${webviewText(d)}</div>` : ''}</td>
     <td>${displayCell(d)}</td>
     <td>${networkCell(d)}</td>
