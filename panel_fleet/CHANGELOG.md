@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Each panel is given the leader's address on its own network. Home Assistant sits on more than one network, and replies follow its default route, so a panel on the IoT network is told the IoT address and a panel elsewhere the main one. The fleet list used to carry one address for everyone, picked from whichever panel came first.
+
 ## 0.3.0
 
 - **Panel Fleet leads the Kiosk Satellite fleet.** It takes the place of the panel that led: it invites panels (the invitation is accepted on the panel's own screen), keeps one set of fleet settings, and pushes each member what its profile allows over Kiosk Satellite's own fleet protocol — the same revision fingerprint, version gate, member directory and never-synced rules as a panel leader, ported from Kiosk Satellite 2026.9.87. Panels need nothing new.

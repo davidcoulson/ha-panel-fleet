@@ -256,3 +256,18 @@ async def test_profiles(rig):
     assert leader.delete_profile("default") == "The Default profile stays"
     assert leader.assign_profile(panel.id, "updates-only") is None
     assert leader.payload_for(m) == {}
+
+
+async def test_each_panel_is_given_the_leader_address_it_reaches(rig, monkeypatch):
+    """The host is on several networks and replies follow the default route,
+    so a panel is told the address the route to it leaves from: the IoT
+    address for a panel on the IoT network, the main one for the rest."""
+    import leader as leader_mod
+
+    panel, leader, _ = rig
+    monkeypatch.setattr(leader_mod, "local_address",
+                        lambda target: "10.2.4.6" if target == "127.0.0.1" else "10.2.3.6")
+    await join(panel, leader)
+    me = next(d for d in panel.rosters[-1]["devices"] if d["id"] == leader.id)
+    assert me["address"] == "10.2.4.6"
+    assert leader.roster("10.2.3.6") != leader.roster("10.2.4.6")

@@ -492,11 +492,15 @@ class Leader:
         log.info("synced %d settings to %s (%s changed)", len(settings), m.name,
                  data.get("applied", 0))
 
-    def roster(self):
+    def roster(self, address=None):
         """The member directory: this leader, then every panel that
         accepted and has not left, sorted by id. The leader is an agent so
-        no panel offers it as an intercom peer."""
-        entries = [ks.directory_entry(self.id, self.name, self.version, self.address or "",
+        no panel offers it as an intercom peer. `address` is the leader's
+        address as the receiving panel reaches it: the host sits on several
+        networks, and a panel on the IoT network must be given the address
+        on its own network, where replies take the same path back."""
+        entries = [ks.directory_entry(self.id, self.name, self.version,
+                                      address or self.address or "",
                                       self.fleet_port, agent=True)]
         for m in self.members.values():
             if m.id in self.tokens and m.id not in self.invites and not m.declined:
@@ -513,11 +517,15 @@ class Leader:
         self.address = (local_address(target) if target else None) or self.address
         if not self.address:
             return
-        devices = self.roster()
-        revision = ks.roster_revision(devices)
         for m in list(self.members.values()):
-            if (m.id not in self.tokens or not m.online or m.roster_revision is None
-                    or m.roster_revision == revision):
+            if m.id not in self.tokens or not m.online or m.roster_revision is None:
+                continue
+            # The same list for everyone but the leader's own address, which
+            # is the one the route to this panel leaves from; so each panel
+            # has its own revision.
+            devices = self.roster(local_address(m.address) if m.address else None)
+            revision = ks.roster_revision(devices)
+            if m.roster_revision == revision:
                 continue
             res = await self._request("POST", f"{m.url}/api/fleet/roster",
                                       token=self.tokens[m.id], body={"devices": devices})
