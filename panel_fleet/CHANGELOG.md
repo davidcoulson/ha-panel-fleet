@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- The sidebar entry uses the tablet-dashboard icon again.
+
 ## 0.3.2
 
 - **The portal fills the window.** While the fleet page is on screen, Home Assistant's own sidebar is hidden (and, on a phone, the title bar above the page), so it reads like a panel's own admin. It is a temporary style only: Home Assistant's docked-sidebar preference is never touched, and the sidebar comes back on **Exit to Home Assistant**, when the page is left or reloaded, and whenever the page is not on screen. A watcher in Home Assistant's window puts it back even if the page cannot.
