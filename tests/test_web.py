@@ -94,3 +94,15 @@ async def test_the_fleet_port_serves_only_the_identity(site, aiohttp_client):
                 assert r.status == 404, path
         async with s.post(f"{base}/api/fleet/identity") as r:
             assert r.status == 405
+
+
+async def test_the_page_ships_its_home_assistant_frame_module(site):
+    _, _, client, _ = site
+    r = await client.get("/static/ha-frame.js")
+    assert r.status == 200
+    text = await r.text()
+    # A temporary style only: never Home Assistant's own sidebar preference.
+    assert "panel-fleet-hide-sidebar" in text
+    assert "hass-dock-sidebar" not in text and "dockedSidebar =" not in text
+    page = await (await client.get("/")).text()
+    assert 'id="sideResults"' in page

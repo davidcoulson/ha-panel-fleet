@@ -2,6 +2,7 @@
 // fleet. The rail and pages are the panel admin's (app.css); this wires the
 // navigation, the theme, the refresh and the pages together.
 
+import { exitToHa, haDarkMode, initHaFrame } from './ha-frame.js';
 import { SUBPAGE_ICONS } from './ks-icons.js';
 import { renderFleet, initFleet } from './members.js';
 import { CATEGORY_NAV, PAGE_NAV } from './nav-icons.js';
@@ -35,11 +36,7 @@ const THEME_ICONS = {
 const media = matchMedia('(prefers-color-scheme: dark)');
 function themePick() { try { return localStorage.getItem('pf_theme') || 'auto'; } catch (e) { return 'auto'; } }
 function systemDark() {
-  try {
-    const hass = parent !== window && parent.document.querySelector('home-assistant')?.hass;
-    if (hass && hass.themes && typeof hass.themes.darkMode === 'boolean') return hass.themes.darkMode;
-  } catch (e) { /* another origin */ }
-  return media.matches;
+  return haDarkMode() ?? media.matches;
 }
 function applyTheme() {
   const pick = themePick();
@@ -57,50 +54,90 @@ media.addEventListener('change', applyTheme);
 
 // ── Navigation ───────────────────────────────────────────────────────
 
-function navButton(tab, disc, title, sub, svg) {
+// The rail's groups as a panel's remote admin has them (index.html in its
+// remote-ui): the heading, then each settings category it holds, with the
+// disc colour it wears there. A category this list has not met yet lands
+// under System.
+const NAV_GROUPS = [
+  { head: 'Home Assistant', items: [['Home Assistant', 1], ['ESPHome', 2], ['Voice Satellite', 3]] },
+  { head: 'Display', items: [['Screen & Audio', 4], ['Screensaver', 1], ['Browser', 2]] },
+  { head: 'Media & Cameras', items: [['Sendspin', 3], ['DLNA', 4], ['Intercom', 1], ['Camera', 2], ['Cameras', 3]] },
+  { head: 'Kiosk', items: [['Kiosk', 4], ['Lockdown', 1], ['Home', 2], ['Launcher', 3], ['Gestures', 4]] },
+  { head: 'System', items: [['Device', 1]] },
+];
+const EXIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17l-5-5 5-5M5 12h11"/><path d="M14 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/></svg>';
+
+function navButton(tab, disc, title, sub, svg, onClick) {
   const b = el('button');
   b.type = 'button';
-  b.dataset.tab = tab;
+  if (tab) b.dataset.tab = tab;
   b.innerHTML = `<span class="disc d${disc}">${svg}</span><span class="nav-text"><span class="nav-title">${esc(title)}</span><span class="nav-sub">${esc(sub)}</span></span>`;
-  b.addEventListener('click', () => { go(tab); closeDrawer(); });
+  b.addEventListener('click', onClick || (() => { leaveSearch(); go(tab); closeDrawer(); }));
   return b;
 }
-function collapsed() { try { return JSON.parse(localStorage.getItem('pf_nav_collapsed') || '[]'); } catch (e) { return []; } }
-function navGroup(id, title, buttons) {
+
+// Rolled-up groups, by heading as the panel admin keys them, kept in this
+// browser. Storage can throw (private windows): then nothing is rolled up.
+function collapsed() {
+  try {
+    const list = JSON.parse(localStorage.getItem('pf_nav_collapsed') || '[]');
+    return new Set(Array.isArray(list) ? list.filter((h) => typeof h === 'string') : []);
+  } catch (e) { return new Set(); }
+}
+function navGroup(head, buttons) {
+  const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const g = el('div', 'nav-group');
   g.setAttribute('role', 'group');
-  const h = el('h2', 'nav-head', title);
+  g.setAttribute('aria-labelledby', `navhead-${slug}`);
+  const h = el('h2', 'nav-head', head);
+  h.id = `navhead-${slug}`;
+  h.setAttribute('role', 'button');
   h.tabIndex = 0;
+  const paint = (on) => { g.classList.toggle('collapsed', on); h.setAttribute('aria-expanded', String(!on)); };
   const toggle = () => {
-    g.classList.toggle('collapsed');
-    const now = collapsed().filter((x) => x !== id);
-    if (g.classList.contains('collapsed')) now.push(id);
-    try { localStorage.setItem('pf_nav_collapsed', JSON.stringify(now)); } catch (e) { /* fine */ }
+    const folded = collapsed();
+    if (!folded.delete(head)) folded.add(head);
+    paint(folded.has(head));
+    try { localStorage.setItem('pf_nav_collapsed', JSON.stringify([...folded].sort())); } catch (e) { /* fine */ }
   };
   h.addEventListener('click', toggle);
   h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
-  if (collapsed().includes(id)) g.classList.add('collapsed');
+  paint(collapsed().has(head));
   g.append(h, ...buttons);
   return g;
 }
 function buildNav() {
   const nav = $('tabs');
   nav.innerHTML = '';
-  nav.appendChild(navButton('panels', 1, PAGES.panels.title, PAGES.panels.sub, PAGE_NAV.panels));
-  nav.appendChild(navGroup('fleet', 'Fleet', [
+  const fleet = [
+    navButton('panels', 4, PAGES.panels.title, PAGES.panels.sub, PAGE_NAV.panels),
     navButton('fleet', 2, PAGES.fleet.title, PAGES.fleet.sub, PAGE_NAV.fleet),
     navButton('profiles', 3, PAGES.profiles.title, PAGES.profiles.sub, PAGE_NAV.profiles),
-  ]));
-  const cats = settingsCategories();
-  const buttons = cats.map((c, i) => {
-    const icon = CATEGORY_NAV[c.id] || { sub: '', svg: PAGE_NAV.profiles };
-    return navButton(`settings/${encodeURIComponent(c.id)}`, ((i + 3) % 4) + 1, c.title, icon.sub, icon.svg);
-  });
-  if (!buttons.length) {
-    const none = navButton('fleet', 4, 'No settings yet', 'Import them on the Fleet page', PAGE_NAV.profiles);
-    buttons.push(none);
+  ];
+  // Only inside Home Assistant: the way back, with its sidebar restored.
+  if (inHa) {
+    fleet.push(navButton(null, 1, 'Exit to Home Assistant', 'Back to its sidebar and dashboards',
+      EXIT_ICON, () => exitToHa()));
   }
-  nav.appendChild(navGroup('settings', 'Fleet settings', buttons));
+  nav.appendChild(navGroup('Fleet', fleet));
+  const cats = settingsCategories();
+  if (!cats.length) {
+    nav.appendChild(navGroup('Fleet settings', [navButton('fleet', 4, 'No settings yet',
+      'Import them on the Fleet page', PAGE_NAV.profiles)]));
+  }
+  const placed = new Set();
+  const groups = NAV_GROUPS.map((g) => ({ head: g.head, items: g.items.filter(([id]) => cats.some((c) => c.id === id)) }));
+  for (const [id] of groups.flatMap((g) => g.items)) placed.add(id);
+  const system = groups.find((g) => g.head === 'System');
+  cats.forEach((c, i) => { if (!placed.has(c.id)) system.items.push([c.id, (i % 4) + 1]); });
+  for (const g of groups) {
+    if (!g.items.length) continue;
+    nav.appendChild(navGroup(g.head, g.items.map(([id, disc]) => {
+      const c = cats.find((x) => x.id === id);
+      const icon = CATEGORY_NAV[id] || { sub: '', svg: PAGE_NAV.profiles };
+      return navButton(`settings/${encodeURIComponent(id)}`, disc, c.title, icon.sub, icon.svg);
+    })));
+  }
   markNav();
 }
 function markNav() {
@@ -176,10 +213,21 @@ $('navBackdrop').addEventListener('click', closeDrawer);
 
 // ── Search over the fleet settings ───────────────────────────────────
 
+// Picking a result, or a page in the rail, leaves the search.
+function leaveSearch() {
+  if (!$('settingsSearch').value) return;
+  $('settingsSearch').value = '';
+  $('settingsSearch').closest('.side-search').classList.remove('has-text');
+  $('sidebar').classList.remove('searching');
+  $('sideResults').innerHTML = '';
+}
+// Results land in the content pane and, on a phone, in the drawer in the
+// nav list's place (app.css #sidebar.searching), as the panel admin does.
 function runSearch() {
   const q = $('settingsSearch').value;
-  $('settingsSearch').parentElement.parentElement.classList.toggle('has-text', !!q);
-  if (!q.trim()) { if (route === 'search') go('panels'); return; }
+  $('settingsSearch').closest('.side-search').classList.toggle('has-text', !!q);
+  $('sidebar').classList.toggle('searching', !!q.trim());
+  if (!q.trim()) { $('sideResults').innerHTML = ''; if (route === 'search') go('panels'); return; }
   const body = $('searchBody');
   body.innerHTML = '';
   const hits = searchSettings(q);
@@ -191,6 +239,7 @@ function runSearch() {
       el('div', 'desc', [titles[categoryOf(s)], s.subpage].filter(Boolean).join(' › ')));
     row.appendChild(info);
     row.addEventListener('click', () => {
+      leaveSearch();
       const cat = encodeURIComponent(categoryOf(s));
       go(s.subpage ? `settings/${cat}/${encodeURIComponent(s.subpage)}` : `settings/${cat}`);
       closeDrawer();
@@ -206,6 +255,13 @@ function runSearch() {
   }
   if (!hits.length) body.appendChild(el('div', 'row', settingsView && settingsView.definitions.length
     ? 'No fleet setting matches.' : 'No fleet settings yet: import them on the Fleet page.'));
+  const side = $('sideResults');
+  side.innerHTML = '';
+  for (const row of body.children) {
+    const copy = row.cloneNode(true);
+    copy.addEventListener('click', () => row.click());
+    side.appendChild(copy);
+  }
   route = 'search';
   show('tab-search');
   setTitle(`Search: ${q}`, null);
@@ -274,6 +330,7 @@ initProfiles({
 });
 initSettings({ navigate: (to) => go(to) });
 
+const inHa = initHaFrame();
 applyTheme();
 await loadSettings();
 go(location.hash.slice(1) || 'panels', { push: false });

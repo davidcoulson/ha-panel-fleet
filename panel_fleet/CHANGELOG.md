@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+- **The portal fills the window.** While the fleet page is on screen, Home Assistant's own sidebar is hidden (and, on a phone, the title bar above the page), so it reads like a panel's own admin. It is a temporary style only: Home Assistant's docked-sidebar preference is never touched, and the sidebar comes back on **Exit to Home Assistant**, when the page is left or reloaded, and whenever the page is not on screen. A watcher in Home Assistant's window puts it back even if the page cannot.
+- **Exit to Home Assistant**, the last item of the Fleet group, returns to Home Assistant's default page with its sidebar. It only shows inside Home Assistant.
+- **The menu is grouped like a panel's**: Fleet (Panels, Fleet, Profiles), then the settings under Home Assistant, Display, Media & Cameras, Kiosk and System, as a panel's remote admin groups them. Each heading folds its group, remembered in the browser.
+- On a phone, settings search results show in the menu itself, in place of the list, as on a panel.
+
 ## 0.3.1
 
 - Each panel is given the leader's address on its own network. Home Assistant sits on more than one network, and replies follow its default route, so a panel on the IoT network is told the IoT address and a panel elsewhere the main one. The fleet list used to carry one address for everyone, picked from whichever panel came first.

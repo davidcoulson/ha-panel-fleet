@@ -12,9 +12,13 @@
     let pick = 'auto';
     try { pick = localStorage.getItem('pf_theme') || 'auto'; } catch (e) { /* fine */ }
     let dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    // Up the frames to Home Assistant's window (the ingress page can sit
+    // one or two frames down); another origin ends the walk.
     try {
-      const hass = parent !== window && parent.document.querySelector('home-assistant')?.hass;
-      if (hass && hass.themes && typeof hass.themes.darkMode === 'boolean') dark = hass.themes.darkMode;
+      for (let w = window; w.parent !== w; w = w.parent) {
+        const hass = w.parent.document.querySelector('home-assistant')?.hass;
+        if (hass && hass.themes && typeof hass.themes.darkMode === 'boolean') { dark = hass.themes.darkMode; break; }
+      }
     } catch (e) { /* another origin: keep the system's */ }
     document.documentElement.dataset.theme = pick === 'auto' ? (dark ? 'dark' : 'light') : pick;
   }
@@ -53,6 +57,7 @@
           </button>
         </div>
       </div>
+      <div id="sideResults" class="edge-fade search-results"></div>
       <nav id="tabs" class="edge-fade"></nav>
       <div class="side-foot">
         <div class="foot-stats"><span class="stat" id="footVersion"></span><span class="stat" id="footStat"></span></div>

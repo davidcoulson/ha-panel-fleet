@@ -2,7 +2,7 @@
 
 Panel Fleet finds the Kiosk Satellite wall panels on your network, lists them in one place, and leads them as a Kiosk Satellite fleet: it keeps one set of settings for the fleet and pushes each panel what its profile allows, the way a panel leading the fleet would. No wall panel has to lead.
 
-It appears in the sidebar as **Kiosk Satellite**, and looks like a panel's own remote admin.
+It appears in the sidebar as **Kiosk Satellite**, and looks like a panel's own remote admin. While it is open, Home Assistant's own sidebar is hidden so the fleet fills the window; **Exit to Home Assistant** (the last item under Fleet in the menu) brings it back and returns to your default dashboard. Leaving the page any other way brings the sidebar back too. Nothing is changed in Home Assistant's own settings.
 
 ## Panels
 

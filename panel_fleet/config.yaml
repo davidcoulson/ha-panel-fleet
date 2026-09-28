@@ -1,5 +1,5 @@
 name: Panel Fleet
-version: "0.3.1"
+version: "0.3.2"
 slug: panel_fleet
 description: Lead your Kiosk Satellite wall panels as one fleet, keep their settings in step, and see at a glance whether each is online and up to date.
 url: https://github.com/davidcoulson/ha-panel-fleet
