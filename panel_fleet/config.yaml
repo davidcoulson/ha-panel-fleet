@@ -1,20 +1,30 @@
 name: Panel Fleet
-version: "0.2.3"
+version: "0.3.0"
 slug: panel_fleet
-description: See every Kiosk Satellite and ha-paneld wall panel on the network, whether it is online and up to date, and what it is showing.
+description: Lead your Kiosk Satellite wall panels as one fleet, keep their settings in step, and see at a glance whether each is online and up to date.
 url: https://github.com/davidcoulson/ha-panel-fleet
 arch:
   - aarch64
   - amd64
 init: false
-# mDNS discovery needs the host's network.
+# mDNS discovery needs the host's network, and the panels call the leader
+# back on fleet_port at the host's own address.
 host_network: true
 ingress: true
 ingress_port: 8099
-panel_icon: mdi:monitor-dashboard
-panel_title: Panel Fleet
+panel_icon: mdi:satellite-variant
+panel_title: Kiosk Satellite
+# The page edits every panel's settings: administrators only.
+panel_admin: true
 homeassistant_api: true
 options:
   scan_interval: 60
+  fleet_port: 2330
 schema:
   scan_interval: int(15,3600)
+  # The panels' remote admin password, to read the settings definitions.
+  panel_password: password?
+  fleet_port: port
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.22
+  amd64: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22

@@ -1,0 +1,5 @@
+# What the tests need beyond panel_fleet/requirements.txt:
+#   python3 -m venv .venv && .venv/bin/pip install -r panel_fleet/requirements.txt -r requirements-dev.txt
+#   .venv/bin/python -m pytest
+pytest
+pytest-aiohttp

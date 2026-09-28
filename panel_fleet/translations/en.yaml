@@ -1,0 +1,10 @@
+configuration:
+  scan_interval:
+    name: Scan interval
+    description: Seconds between polls of every panel's health.
+  panel_password:
+    name: Panel admin password
+    description: The remote admin password your Kiosk Satellite panels share. Used only to read the settings definitions and values from a panel (Import from panel, Refresh definitions).
+  fleet_port:
+    name: Fleet port
+    description: The port on this host the panels call back to check an invitation. Only the leader's identity is served there.

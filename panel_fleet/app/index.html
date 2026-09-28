@@ -2,571 +2,118 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Panel Fleet</title>
-<style>
-  :root {
-    --bg: #f4f6f8;
-    --surface: #ffffff;
-    --ink: #1c2329;
-    --muted: #5f6b76;
-    --line: #e1e6eb;
-    --accent: #0a7fc2;
-    --good: #1e8a4c;
-    --good-bg: #e3f4ea;
-    --warn: #a15c00;
-    --warn-bg: #fdf0dc;
-    --bad: #b3261e;
-    --off: #9aa5af;
-    --chip: #eef2f5;
-    --radius: 10px;
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kiosk Satellite Fleet</title>
+<script>
+  // Theme before first paint, as a panel's remote admin does it: the pick
+  // saved in this browser, else Home Assistant's own dark mode when this
+  // page sits in its frame, else the system's. app.js keeps it current.
+  {
+    let pick = 'auto';
+    try { pick = localStorage.getItem('pf_theme') || 'auto'; } catch (e) { /* fine */ }
+    let dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    try {
+      const hass = parent !== window && parent.document.querySelector('home-assistant')?.hass;
+      if (hass && hass.themes && typeof hass.themes.darkMode === 'boolean') dark = hass.themes.darkMode;
+    } catch (e) { /* another origin: keep the system's */ }
+    document.documentElement.dataset.theme = pick === 'auto' ? (dark ? 'dark' : 'light') : pick;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #111416;
-      --surface: #1b2024;
-      --ink: #e6ebef;
-      --muted: #9aa6b0;
-      --line: #2a3137;
-      --accent: #4fb3ea;
-      --good: #5fd08e;
-      --good-bg: #183324;
-      --warn: #f0b35a;
-      --warn-bg: #3a2c14;
-      --bad: #f28b82;
-      --off: #5c666e;
-      --chip: #252c31;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #111416; --surface: #1b2024; --ink: #e6ebef; --muted: #9aa6b0;
-    --line: #2a3137; --accent: #4fb3ea; --good: #5fd08e; --good-bg: #183324;
-    --warn: #f0b35a; --warn-bg: #3a2c14; --bad: #f28b82; --off: #5c666e; --chip: #252c31;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font: 14px/1.45 Roboto, "Segoe UI", system-ui, -apple-system, sans-serif;
-  }
-  /* Wide enough for the table to fit without a sideways scroll that hides
-     the last column. */
-  main { max-width: 1480px; margin: 0 auto; padding: 20px 16px 40px; }
-  header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; margin-bottom: 16px; }
-  h1 { font-size: 22px; font-weight: 500; margin: 0; letter-spacing: -0.01em; }
-  .summary { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .summary b { color: var(--ink); font-weight: 500; }
-  .summary .warn b { color: var(--warn); }
-  .spacer { flex: 1; }
-  button {
-    font: inherit; color: var(--accent); background: transparent;
-    border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer;
-  }
-  button:hover { background: var(--chip); }
-  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .note { color: var(--muted); font-size: 13px; margin: -6px 0 14px; }
-  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .search { position: relative; flex: 1 1 320px; max-width: 460px; }
-  .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; fill: var(--muted); }
-  .search input {
-    width: 100%; font: inherit; color: var(--ink); background: var(--surface);
-    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 10px 38px;
-  }
-  .filter-wrap { position: relative; }
-  .filter-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 10px; color: var(--ink); }
-  .filter-btn svg { width: 17px; height: 17px; fill: var(--muted); }
-  .filter-btn[aria-expanded="true"] { border-style: dashed; border-color: var(--accent); }
-  .badge-count {
-    min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent);
-    color: var(--surface); font-size: 11.5px; line-height: 18px; text-align: center;
-  }
-  .filter-pop {
-    position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 300px;
-    max-height: 70vh; overflow-y: auto; background: var(--surface);
-    border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.28);
-  }
-  .pop-head {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 12px 14px; border-bottom: 1px solid var(--line);
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
-  }
-  .pop-head button { padding: 3px 9px; font-size: 12px; text-transform: none; letter-spacing: 0; }
-  .filter-pop details { border-bottom: 1px solid var(--line); }
-  .filter-pop details:last-child { border-bottom: 0; }
-  .filter-pop summary {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 11px 14px; cursor: pointer; font-size: 14px; list-style: none;
-  }
-  .filter-pop summary::-webkit-details-marker { display: none; }
-  .filter-pop summary::after {
-    content: ""; width: 8px; height: 8px; margin-right: 2px;
-    border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
-    transform: rotate(45deg) translate(-2px, -2px);
-  }
-  .filter-pop details[open] summary::after { transform: rotate(-135deg) translate(-3px, -3px); }
-  .filter-pop summary:hover { background: var(--chip); }
-  .opt { display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 16px; cursor: pointer; font-size: 13.5px; }
-  .opt:hover { background: var(--chip); }
-  .opt input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
-  .opt .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .opt.none { color: var(--muted); cursor: default; }
-  .filter-pop details > div { padding-bottom: 8px; }
-  .note.err { color: var(--bad); }
-
-  .table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; min-width: 1180px; }
-  th {
-    text-align: left; font-weight: 500; font-size: 12px; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
-  }
-  td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  tr:last-child td { border-bottom: 0; }
-  tr.offline td { color: var(--muted); }
-  /* The name and its open-in-new icon are one line: the icon dropping to a
-     line of its own read as a second, empty row. */
-  .name { font-weight: 500; color: var(--ink); white-space: nowrap; }
-  /* Same for the .local name under it: a hostname broken across two lines
-     is no longer a hostname you can read off the screen. */
-  .hostname { white-space: nowrap; }
-  .sub { color: var(--muted); font-size: 12.5px; }
-  .mono { font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-  .status { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
-  .online .dot { background: var(--good); box-shadow: 0 0 0 3px var(--good-bg); }
-  .chip {
-    display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
-    background: var(--chip); color: var(--muted); white-space: nowrap; vertical-align: 1px;
-  }
-  .chip.agent { margin-left: 5px; background: var(--good-bg); color: var(--good); }
-  .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
-  .badge.current { background: var(--good-bg); color: var(--good); }
-  .badge.outdated { background: var(--warn-bg); color: var(--warn); }
-  .badge.ahead, .badge.unknown { background: var(--chip); color: var(--muted); }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  /* A version, a hostname and a dashboard path are each one string: broken
-     over two lines they read as two. Long paths end in an ellipsis with the
-     whole thing in the title. */
-  .nowrap { white-space: nowrap; }
-  .page {
-    display: inline-block; max-width: 250px; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;
-  }
-  .actions { white-space: nowrap; text-align: right; }
-  .open {
-    display: inline-flex; vertical-align: -3px; margin-left: 6px;
-    color: var(--muted); border-radius: 4px;
-  }
-  .open:hover { color: var(--accent); text-decoration: none; }
-  .open svg { width: 17px; height: 17px; fill: currentColor; }
-  .actions button { padding: 3px 9px; font-size: 12.5px; color: var(--muted); }
-  .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
-  .facts { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .facts .lag { color: var(--warn); }
-  tr.detail > td { padding: 0 14px 16px; }
-  .grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 10px 22px; background: var(--chip); border-radius: 8px; padding: 14px 16px;
-  }
-  .grid dt {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
-    color: var(--muted); margin-bottom: 2px;
-  }
-  .grid dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
-  .grid dd .sub { display: block; }
-  .more { color: var(--muted); }
-  .more[aria-expanded="true"] svg { transform: rotate(180deg); }
-  .more svg { width: 16px; height: 16px; fill: currentColor; vertical-align: -3px; transition: transform 0.15s; }
-  @media (prefers-reduced-motion: reduce) { .more svg { transition: none; } }
-  @media (prefers-reduced-motion: no-preference) { .dot { transition: background 0.3s; } }
-</style>
+</script>
+<link rel="stylesheet" href="static/app.css?v=__V__">
+<link rel="stylesheet" href="static/fleet.css?v=__V__">
 </head>
 <body>
-<main>
-  <header>
-    <h1>Panel Fleet</h1>
-    <span class="chip" id="version" hidden></span>
-    <div class="summary" id="summary"></div>
-    <div class="spacer"></div>
-    <button id="scan" type="button">Scan now</button>
-  </header>
-  <p class="note" id="note"></p>
-  <div class="toolbar">
-    <div class="search">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 3a6.5 6.5 0 0 1 5.25 10.33l5.46 5.46-1.42 1.42-5.46-5.46A6.5 6.5 0 1 1 9.5 3Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z"/></svg>
-      <input id="q" type="search" placeholder="Search panels…" aria-label="Search panels">
+<section id="app">
+  <!-- Phone top bar; on wide screens the rail is always visible instead. -->
+  <div class="mobilebar">
+    <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <span class="brand-mark"></span>
+    <div class="mbrand">
+      <span class="mtitle">Kiosk Satellite</span>
+      <span class="brand-sub">Fleet</span>
     </div>
-    <div class="filter-wrap">
-      <button id="filter-btn" type="button" class="filter-btn" aria-expanded="false" aria-controls="filter-pop">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2H3V5Zm3 6h12v2H6v-2Zm3 6h6v2H9v-2Z"/></svg>
-        Filters<span class="badge-count" id="filter-count" hidden></span>
-      </button>
-      <div class="filter-pop" id="filter-pop" hidden>
-        <div class="pop-head"><span>Filters</span><button id="clear" type="button" hidden>Clear all</button></div>
-        <div id="filter-sections"></div>
+  </div>
+  <div class="shell">
+    <aside id="sidebar">
+      <!-- The panel admin's header: the mark, Kiosk Satellite, and where a
+           panel names itself, this names the fleet. -->
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div class="brand-text">
+          <div class="brand-title">Kiosk Satellite <span class="dot" id="connDot"></span></div>
+          <span class="brand-sub">Fleet</span>
+        </div>
       </div>
-    </div>
+      <div class="side-search">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="settingsSearch" type="search" placeholder="Search fleet settings" autocomplete="off" spellcheck="false">
+          <button class="clear" id="settingsSearchClear" type="button" aria-label="Clear search" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+      </div>
+      <nav id="tabs" class="edge-fade"></nav>
+      <div class="side-foot">
+        <div class="foot-stats"><span class="stat" id="footVersion"></span><span class="stat" id="footStat"></span></div>
+        <div class="foot-actions">
+          <button class="icon-btn" id="themeBtn" title="Theme" aria-label="Theme"></button>
+          <span class="stat" id="footTheme"></span>
+        </div>
+      </div>
+    </aside>
+    <div class="nav-backdrop" id="navBackdrop"></div>
+    <main>
+      <h1 id="pageTitle">Panels</h1>
+
+      <!-- Panels: every Kiosk Satellite panel on the network. -->
+      <div class="tab" id="tab-panels">
+        <div class="pf-summary" id="summary"></div>
+        <div class="banner warn hidden" id="note"></div>
+        <div class="toolbar pf-toolbar">
+          <div class="pf-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" type="search" placeholder="Search panels" aria-label="Search panels">
+          </div>
+          <div class="pf-filter-wrap">
+            <button id="filter-btn" type="button" class="btn-ghost" aria-expanded="false" aria-controls="filter-pop">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+              Filters<span class="pf-count" id="filter-count" hidden></span>
+            </button>
+            <div class="pf-pop" id="filter-pop" hidden>
+              <div class="pf-pop-head"><span>Filters</span><button id="clear" type="button" class="btn-text" hidden>Clear all</button></div>
+              <div id="filter-sections"></div>
+            </div>
+          </div>
+          <span class="spacer"></span>
+          <button id="scan" type="button" class="btn-primary">Scan now</button>
+        </div>
+        <div class="card pf-table-card">
+          <div class="pf-table-scroll">
+            <table class="pf-table">
+              <thead>
+                <tr><th>Status</th><th>Panel</th><th>Platform</th><th>Display</th><th>Network</th><th>Version</th><th>Dashboard</th><th></th></tr>
+              </thead>
+              <tbody id="rows"><tr><td colspan="8" class="pf-empty">Looking for panels…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fleet: Panel Fleet leads; who follows and how each is doing. -->
+      <div class="tab" id="tab-fleet"><div id="fleetBody"></div></div>
+
+      <!-- Profiles: what each follower gets. -->
+      <div class="tab" id="tab-profiles"><div id="profilesBody"></div></div>
+
+      <!-- Search results over the fleet settings. -->
+      <div class="tab" id="tab-search"><div class="card search-results" id="searchBody"></div></div>
+
+      <!-- One tab per settings category, built from the definitions. -->
+      <div id="settingsTabs"></div>
+    </main>
   </div>
-  <div class="table">
-    <table>
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Panel</th>
-          <th>Platform</th>
-          <th>Display</th>
-          <th>Network</th>
-          <th>Version</th>
-          <th>Dashboard</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="rows"><tr><td colspan="8" class="empty">Looking for panels…</td></tr></tbody>
-    </table>
-  </div>
-</main>
-<script>
-const KIND = { ks: 'Kiosk Satellite', paneld: 'ha-paneld' };
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-function ago(ts, now) {
-  if (!ts) return 'never seen';
-  const s = Math.max(0, now - ts);
-  if (s < 60) return 'last seen just now';
-  if (s < 3600) return `last seen ${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `last seen ${Math.floor(s / 3600)}h ago`;
-  return `last seen ${Math.floor(s / 86400)}d ago`;
-}
-function duration(s) {
-  if (s == null) return '';
-  if (s < 3600) return Math.round(s / 60) + ' min';
-  if (s < 172800) return Math.round(s / 3600) + ' h';
-  return Math.round(s / 86400) + ' days';
-}
-// Every panel's WebView, with the Android it runs on, so one left behind can
-// be told from one that has simply run out of road: Chrome and the WebView
-// stop shipping for old Android, and WebView 138 is as far as Android 8.1
-// goes. A panel counts as behind only when another panel on the same Android
-// or older runs something newer - a comparison the fleet can make from what
-// it has, without a table of ceilings that would need maintaining.
-let fleetWebviews = [];
-function major(v) { const n = parseInt(String(v || ''), 10); return Number.isFinite(n) ? n : null; }
-function bestWebviewFor(d) {
-  const api = d.android_api;
-  let best = null;
-  for (const other of fleetWebviews) {
-    if (api != null && other.api != null && other.api > api) continue;
-    if (best == null || other.major > best) best = other.major;
-  }
-  return best;
-}
-function webviewBehind(d) {
-  const mine = major(d.webview), best = bestWebviewFor(d);
-  return mine != null && best != null && mine < best;
-}
-function webviewText(d) {
-  if (!d.webview) return '';
-  const mine = major(d.webview);
-  const behind = webviewBehind(d);
-  return `<span class="${behind ? 'lag' : ''}" title="${esc(d.webview_package || '')} ${esc(d.webview)}${
-    behind ? ` \u2014 another panel on this Android or older runs ${bestWebviewFor(d)}` : ''
-  }">WebView ${esc(String(mine ?? d.webview))}${behind ? ' \u2193' : ''}</span>`;
-}
-// A channel's centre frequency as the band and channel people name it by.
-// 2484 is channel 14 and 5935 is 6 GHz channel 2; both sit outside their
-// band's arithmetic, which is why they are spelled out.
-function channel(mhz) {
-  if (!mhz) return null;
-  if (mhz === 2484) return { band: '2.4 GHz', ch: 14 };
-  if (mhz >= 2412 && mhz <= 2472) return { band: '2.4 GHz', ch: (mhz - 2407) / 5 };
-  if (mhz >= 5160 && mhz <= 5885) return { band: '5 GHz', ch: (mhz - 5000) / 5 };
-  if (mhz === 5935) return { band: '6 GHz', ch: 2 };
-  if (mhz >= 5955 && mhz <= 7115) return { band: '6 GHz', ch: (mhz - 5950) / 5 };
-  return null;
-}
-function displayCell(d) {
-  // An agent's screen shows whatever that box shows - a projector's own
-  // launcher, usually. Its size is not a fact about the panel's dashboard,
-  // because there isn't one.
-  if (d.agent) return '<span class="sub">—</span>';
-  const s = d.screen;
-  if (!s) return '<span class="sub">unknown</span>';
-  const under = [s.orientation, s.rotation ? `turned ${s.rotation}\u00b0` : '']
-    .filter(Boolean).join(' \u00b7 ');
-  return `<div class="mono">${s.width}\u00d7${s.height}</div>` +
-    (under ? `<div class="sub">${esc(under)}</div>` : '');
-}
-function networkCell(d) {
-  const l = d.link || {};
-  const c = channel(l.frequencyMhz);
-  const name = { ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[l.type] || '';
-  const radio = l.type === 'wifi'
-    ? [l.rssi != null ? `${l.rssi} dBm` : '', l.speedMbps ? `${l.speedMbps} Mbps` : ''].filter(Boolean).join(' \u00b7 ')
-    : '';
-  // Channel, signal and speed read as one measurement, so they stay on one line.
-  // Band on the first line with the medium, channel down with the numbers:
-  // "Wi-Fi 2.4 GHz" wrapped mid-phrase when the channel rode along with it.
-  const under = [c ? `ch ${c.ch}` : '', radio].filter(Boolean).join(' \u00b7 ');
-  return (name ? `<div>${esc(name)}${c ? ` ${esc(c.band)}` : ''}</div>` : '') +
-    (under ? `<div class="sub nowrap">${esc(under)}</div>` : '') +
-    `<div class="sub mono">${esc(d.host || '')}</div>`;
-}
-function detailRow(d) {
-  const rows = [
-    ['Display', [d.screen ? `${d.screen.width}\u00d7${d.screen.height}` : '',
-      d.screen && d.screen.orientation, d.screen && d.screen.dpi ? `${d.screen.dpi} dpi` : '',
-      d.screen && d.screen.rotation ? `turned ${d.screen.rotation}\u00b0` : ''].filter(Boolean).join(' \u00b7 ')],
-    ['Android', [d.android, d.android_api ? `API ${d.android_api}` : ''].filter(Boolean).join(' \u00b7 '),
-      d.android_build],
-    ['System WebView', d.webview ? `${d.webview}` : '', d.webview_package],
-    ['Memory', d.ram_text || ''],
-    ['Storage', d.storage_text || ''],
-    ['CPU', d.cpu_text || ''],
-    ['Uptime', d.uptime_device != null ? `device up ${duration(d.uptime_device)}` : '',
-      d.uptime != null ? `app up ${duration(d.uptime)}` : ''],
-    ['Battery', d.battery != null ? `${d.battery}%${d.charging ? ' \u00b7 charging' : ''}` : ''],
-  ].filter(([, value]) => value);
-  return `<tr class="detail" data-detail="${esc(d.key)}"><td colspan="8"><dl class="grid">` +
-    rows.map(([label, value, sub]) =>
-      `<div><dt>${esc(label)}</dt><dd>${esc(value)}${sub ? `<span class="sub mono">${esc(sub)}</span>` : ''}</dd></div>`).join('') +
-    '</dl></td></tr>';
-}
-function versionCell(d) {
-  if (!d.version) return '<span class="sub">unknown</span>';
-  const base = d.fork ? d.version.slice(0, d.version.length - d.fork.length) : d.version;
-  const label = {
-    current: 'Current',
-    outdated: 'Update to ' + esc(d.latest),
-    ahead: 'Newer than release',
-    unknown: 'Latest unknown',
-  }[d.version_status];
-  return `<div class="mono nowrap">${esc(base)}</div>` +
-    (d.fork ? `<div class="sub mono nowrap" title="Fork build">${esc(d.fork.replace(/^-/, ''))}</div>` : '') +
-    `<div style="margin-top:4px"><span class="badge ${d.version_status}">${label}</span></div>`;
-}
-function pageCell(d) {
-  if (d.agent) return '<span class="sub" title="An agent shows no dashboard">—</span>';
-  if (!d.dashboard_href) return '<span class="sub">not reported</span>';
-  // A bare path is a Home Assistant page: open it on Home Assistant's own origin.
-  const href = d.dashboard_href.startsWith('/') ? new URL(d.dashboard_href, location.origin).href : d.dashboard_href;
-  const home = d.kind === 'paneld' && d.home_dashboard && d.home_dashboard !== d.dashboard_path
-    ? `<div class="sub">home <span class="mono">${esc(d.home_dashboard)}</span></div>` : '';
-  return `<a class="page mono" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(d.dashboard_href)}">${esc(d.dashboard_path)}</a>${home}`;
-}
-function statusCell(d, now) {
-  if (d.online == null) return '<div class="status"><span class="dot"></span>Checking…</div>';
-  if (!d.online) {
-    return `<div class="status"><span class="dot"></span>Offline</div><div class="sub">${ago(d.last_seen || d.announced, now)}</div>`;
-  }
-  return '<div class="status online"><span class="dot"></span>Online</div>' +
-    (d.uptime != null ? `<div class="sub">up ${duration(d.uptime)}</div>` : '') +
-    (d.screen_on === false ? '<div class="sub">screen off</div>' : '');
-}
-function row(d, now) {
-  const on = d.online !== false;
-  const status = statusCell(d, now);
-  const platform = [d.model, d.android].filter(Boolean).join(' · ');
-  return `<tr class="${on ? '' : 'offline'}">
-    <td>${status}</td>
-    <td><div class="name">${esc(d.name || d.id)}${d.admin
-          ? `<a class="open" href="${esc(d.admin)}" target="_blank" rel="noopener" title="Open the admin page" aria-label="Open the admin page for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7Z"/></svg></a>`
-          : ''}</div>
-        ${d.hostname ? `<div class="sub mono hostname">${esc(d.hostname)}.local</div>` : ''}
-        <div style="margin-top:4px"><span class="chip">${KIND[d.kind] || d.kind}</span>${
-          d.agent ? '<span class="chip agent" title="Runs as a management agent: no dashboard, voice or screensaver">Agent</span>' : ''}</div></td>
-    <td><div>${esc(platform)}</div>${webviewText(d) ? `<div class="facts">${webviewText(d)}</div>` : ''}</td>
-    <td>${displayCell(d)}</td>
-    <td>${networkCell(d)}</td>
-    <td>${versionCell(d)}</td>
-    <td>${pageCell(d)}</td>
-    <td class="actions">
-      ${d.online !== false ? '' : `<button type="button" data-forget="${esc(d.key)}" title="Remove until it is discovered again">Forget</button>`}
-      <button type="button" class="more" data-more="${esc(d.key)}" aria-expanded="false"
-        title="Everything this panel reports" aria-label="Details for ${esc(d.name || d.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6 1.4-1.4Z"/></svg></button>
-    </td>
-  </tr>` + (open.has(d.key) ? detailRow(d) : '');
-}
-// Which panels are expanded, kept across the fifteen-second refresh so a
-// detail being read does not fold itself up mid-sentence.
-const open = new Set();
-let last = null;
-
-// One dropdown, one section per question the fleet can answer about itself.
-// Each section names the values a panel has; ticking several inside a section
-// widens the list (online OR offline), ticking across sections narrows it.
-const SECTIONS = [
-  { key: 'status', label: 'Status', of: (d) => [d.online === true ? 'Online' : d.online === false ? 'Offline' : 'Checking'] },
-  { key: 'kind', label: 'Software', of: (d) => [KIND[d.kind] || d.kind] },
-  { key: 'model', label: 'Platform', of: (d) => [d.model || 'Unknown'] },
-  { key: 'android', label: 'Android', of: (d) => [d.android || 'Unknown'] },
-  { key: 'link', label: 'Network', of: (d) => {
-      const t = (d.link || {}).type;
-      return [{ ethernet: 'Ethernet', wifi: 'Wi-Fi', cellular: 'Cellular', vpn: 'VPN' }[t] || 'Unknown'];
-    } },
-  // The only section where a panel can land in more than one row, or none.
-  { key: 'attention', label: 'Needs attention', of: (d) => [
-      d.version_status === 'outdated' ? 'Update available' : null,
-      webviewBehind(d) ? 'WebView behind the fleet' : null,
-      d.screen_on === false ? 'Screen off' : null,
-    ].filter(Boolean) },
-];
-
-// Ticked values per section, remembered per browser: whoever narrowed the
-// list to the offline panels was in the middle of something, and a refresh
-// should not undo it. Storage can throw (private windows), so every touch is
-// guarded and the page works without it.
-let picked = {};
-function loadFilters() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('panel-fleet-filters') || '{}');
-    picked = {};
-    for (const sec of SECTIONS) {
-      if (Array.isArray(saved[sec.key])) picked[sec.key] = new Set(saved[sec.key]);
-    }
-    if (typeof saved.q === 'string') $('q').value = saved.q;
-  } catch (e) { /* fine */ }
-}
-function saveFilters() {
-  const out = { q: $('q').value };
-  for (const [k, v] of Object.entries(picked)) if (v.size) out[k] = [...v];
-  try { localStorage.setItem('panel-fleet-filters', JSON.stringify(out)); } catch (e) { /* fine */ }
-}
-function activeCount() {
-  return Object.values(picked).reduce((n, v) => n + v.size, 0);
-}
-function matchesSearch(d) {
-  const q = $('q').value.trim().toLowerCase();
-  if (!q) return true;
-  return [d.name, d.id, d.model, d.android, d.host, d.hostname, d.version,
-    d.dashboard_path, d.webview, KIND[d.kind]].filter(Boolean).join(' ').toLowerCase().includes(q);
-}
-// `except` leaves one section out, so its own counts are measured against
-// everything else — the count beside a value says what ticking it would give.
-function matches(d, except) {
-  if (!matchesSearch(d)) return false;
-  for (const sec of SECTIONS) {
-    if (sec.key === except) continue;
-    const want = picked[sec.key];
-    if (!want || !want.size) continue;
-    if (!sec.of(d).some((v) => want.has(v))) return false;
-  }
-  return true;
-}
-function renderFilters(all) {
-  $('filter-sections').innerHTML = SECTIONS.map((sec) => {
-    const pool = all.filter((d) => matches(d, sec.key));
-    const counts = new Map();
-    for (const d of pool) for (const v of sec.of(d)) counts.set(v, (counts.get(v) || 0) + 1);
-    // A value nobody has any more still shows while it is ticked, so a filter
-    // can always be unticked from where it was set.
-    for (const v of picked[sec.key] || []) if (!counts.has(v)) counts.set(v, 0);
-    const chosen = picked[sec.key] ? picked[sec.key].size : 0;
-    const opts = [...counts.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(b[0]));
-    const body = opts.length
-      ? opts.map(([v, n]) => `<label class="opt"><input type="checkbox" data-sec="${esc(sec.key)}" value="${esc(v)}"${
-          picked[sec.key] && picked[sec.key].has(v) ? ' checked' : ''}><span>${esc(v)}</span><span class="n">${n}</span></label>`).join('')
-      : '<div class="opt none">Nothing to filter by</div>';
-    return `<details${chosen ? ' open' : ''}><summary>${esc(sec.label)}${
-      chosen ? ` <span class="chip">${chosen}</span>` : ''}</summary><div>${body}</div></details>`;
-  }).join('');
-}
-function render(data) {
-  last = data;
-  const all = data.devices;
-  fleetWebviews = all.filter((d) => major(d.webview) != null)
-    .map((d) => ({ major: major(d.webview), api: d.android_api ?? null }));
-  const ds = all.filter((d) => matches(d));
-  const filtered = ds.length !== all.length;
-  renderFilters(all);
-  const active = activeCount();
-  $('filter-count').textContent = active;
-  $('filter-count').hidden = !active;
-  $('clear').hidden = !active && !$('q').value;
-  const online = all.filter((d) => d.online).length;
-  const outdated = all.filter((d) => d.version_status === 'outdated').length;
-  const latest = Object.entries(data.latest || {})
-    .map(([k, v]) => `${KIND[k] || k} <a href="${esc(v.url)}" target="_blank" rel="noopener" class="mono">${esc(v.version)}</a>`)
-    .join(' · ');
-  $('summary').innerHTML =
-    `<span><b>${all.length}</b> panels</span>` +
-    (filtered ? `<span><b>${ds.length}</b> shown</span>` : '') +
-    `<span><b>${online}</b> online</span>` +
-    `<span class="${outdated ? 'warn' : ''}"><b>${outdated}</b> need an update</span>` +
-    (latest ? `<span>Latest: ${latest}</span>` : '');
-  const v = $('version');
-  v.textContent = data.version ? 'v' + data.version : '';
-  v.hidden = !data.version;
-  $('note').textContent = data.ha_error ? `Pages shown need Home Assistant (${data.ha_error}).` : '';
-  $('note').className = 'note' + (data.ha_error ? ' err' : '');
-  $('rows').innerHTML = ds.length
-    ? ds.map((d) => row(d, data.now)).join('')
-    : `<tr><td colspan="8" class="empty">${all.length
-        ? 'No panel matches these filters.'
-        : 'No panels found yet. Kiosk Satellite panels announce themselves when their remote admin is on.'}</td></tr>`;
-}
-async function load(path = 'api/devices', init) {
-  try {
-    const r = await fetch(path, init);
-    render(await r.json());
-  } catch (e) {
-    $('note').textContent = 'Could not reach the add-on: ' + e.message;
-    $('note').className = 'note err';
-  }
-}
-$('scan').addEventListener('click', async (e) => {
-  e.target.disabled = true;
-  e.target.textContent = 'Scanning…';
-  await load('api/scan', { method: 'POST' });
-  e.target.disabled = false;
-  e.target.textContent = 'Scan now';
-});
-$('rows').addEventListener('click', (e) => {
-  const forget = e.target.closest('[data-forget]');
-  if (forget) {
-    open.delete(forget.dataset.forget);
-    load('api/devices/' + encodeURIComponent(forget.dataset.forget), { method: 'DELETE' });
-    return;
-  }
-  const more = e.target.closest('[data-more]');
-  if (more) {
-    const key = more.dataset.more;
-    open.has(key) ? open.delete(key) : open.add(key);
-    if (last) render(last);
-  }
-});
-$('q').addEventListener('input', () => { saveFilters(); if (last) render(last); });
-$('filter-sections').addEventListener('change', (e) => {
-  const box = e.target.closest('input[data-sec]');
-  if (!box) return;
-  const set = picked[box.dataset.sec] || (picked[box.dataset.sec] = new Set());
-  box.checked ? set.add(box.value) : set.delete(box.value);
-  saveFilters();
-  if (last) render(last);
-});
-$('clear').addEventListener('click', () => {
-  picked = {};
-  $('q').value = '';
-  saveFilters();
-  if (last) render(last);
-});
-// The dropdown closes on a click outside it or on Escape, like every other
-// menu; clicks inside must not close it, since ticking is what it is for.
-const pop = $('filter-pop'), btn = $('filter-btn');
-function setPop(open) {
-  pop.hidden = !open;
-  btn.setAttribute('aria-expanded', String(open));
-}
-btn.addEventListener('click', () => setPop(pop.hidden));
-document.addEventListener('click', (e) => {
-  if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) setPop(false);
-});
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPop(false); });
-loadFilters();
-load();
-setInterval(load, 15000);
-</script>
+</section>
+<script type="module" src="static/app.js?v=__V__"></script>
 </body>
 </html>

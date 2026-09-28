@@ -1,9 +1,16 @@
-"""Panel Fleet: a high-level view of the wall panels on the network.
+"""Panel Fleet: the Kiosk Satellite wall panels on the network, and their
+fleet leader.
 
-Finds Kiosk Satellite and ha-paneld panels over mDNS, remembers them, polls
-each one's unauthenticated health endpoint, compares its version with the
-latest GitHub release and, through Home Assistant, shows the page it is on.
-Everything else is a link to the panel's own admin page.
+Finds Kiosk Satellite panels over mDNS, remembers them, polls each one's
+unauthenticated health endpoint, compares its version with the latest
+GitHub release and, through Home Assistant, shows the page it is on.
+
+It also leads them as a Kiosk Satellite fleet (leader.py): it invites
+panels, keeps the fleet's settings and profiles, and pushes each follower
+what its profile allows, the way a panel leading the fleet would. The
+followers call back one address on it, GET /api/fleet/identity on
+fleet_port, to check an invitation came from the leader it names; that is
+the only thing served outside ingress.
 """
 
 import asyncio
@@ -13,13 +20,15 @@ import os
 import re
 import time
 from pathlib import Path
-from html import unescape
 from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import web
 from zeroconf import IPVersion, ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
+
+from jsonfile import read_json, write_json
+from leader import Leader
 
 log = logging.getLogger("panel_fleet")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -28,16 +37,12 @@ DATA = Path(os.environ.get("DATA_DIR", "/data"))
 STORE = DATA / "devices.json"
 HERE = Path(__file__).parent
 
-
-def _options():
-    try:
-        return json.loads((DATA / "options.json").read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-OPTIONS = _options()
+OPTIONS = read_json(DATA / "options.json", {})
 SCAN_INTERVAL = int(OPTIONS.get("scan_interval", 60))
+# The panels' remote admin password, for reading the settings definitions
+# (Import from panel, Refresh definitions). Nothing else logs in.
+PANEL_PASSWORD = OPTIONS.get("panel_password") or ""
+FLEET_PORT = int(OPTIONS.get("fleet_port", 2330))
 
 # Home Assistant: the Supervisor proxy inside the add-on, or HA_URL/HA_TOKEN
 # when run by hand for development.
@@ -48,15 +53,8 @@ else:
     HA_API = os.environ.get("HA_URL", "").rstrip("/") + "/api" if os.environ.get("HA_URL") else ""
     HA_TOKEN = os.environ.get("HA_TOKEN", "")
 
-KINDS = {
-    "_kiosk-satellite._tcp.local.": "ks",
-    "_ha-paneld._tcp.local.": "paneld",
-}
-
-RELEASE_REPOS = {
-    "ks": "jxlarrea/kiosk-satellite",
-    "paneld": "maxlyth/ha-paneld",
-}
+SERVICE = "_kiosk-satellite._tcp.local."
+RELEASE_REPO = "jxlarrea/kiosk-satellite"
 
 OFFLINE_AFTER = 3  # failed polls in a row before a panel reads offline
 
@@ -94,45 +92,45 @@ def fork_suffix(version):
 
 
 class Fleet:
+    """The panels discovery has found. Only discovery and polling facts:
+    fleet membership, tokens and settings are the leader's, in files of
+    their own, so nothing here can carry a secret to a page."""
+
     def __init__(self):
         self.devices = {}
-        self.latest = {}  # kind -> {"version", "url", "checked"}
+        self.latest = {}  # "ks" -> {"version", "url", "checked"}
         self.ha_error = None
         self.on_new = None  # called with a newly found panel
         self._load()
 
     def _load(self):
-        try:
-            saved = json.loads(STORE.read_text())
-            self.devices = saved.get("devices", {})
-            self.latest = saved.get("latest", {})
-        except (OSError, ValueError):
-            pass
+        saved = read_json(STORE, {})
+        # Only Kiosk Satellite panels: 0.3.0 dropped the other kind.
+        self.devices = {k: d for k, d in (saved.get("devices") or {}).items()
+                        if d.get("kind") == "ks"}
+        self.latest = {k: v for k, v in (saved.get("latest") or {}).items() if k == "ks"}
         # Not known until the first poll answers: "checking", not "offline".
         for d in self.devices.values():
             d["online"] = None
             d["misses"] = OFFLINE_AFTER - 1
 
     def save(self):
-        DATA.mkdir(parents=True, exist_ok=True)
-        tmp = STORE.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"devices": self.devices, "latest": self.latest}, indent=1))
-        tmp.replace(STORE)
+        write_json(STORE, {"devices": self.devices, "latest": self.latest})
 
-    def upsert(self, kind, ident, **fields):
-        key = f"{kind}:{ident}"
+    def upsert(self, ident, **fields):
+        key = f"ks:{ident}"
         now = time.time()
         d = self.devices.get(key)
         if d is None:
             d = self.devices[key] = {
                 "key": key,
-                "kind": kind,
+                "kind": "ks",
                 "id": ident,
                 "first_seen": now,
                 "online": False,
                 "misses": 0,
             }
-            log.info("found %s %s at %s", kind, fields.get("name") or ident, fields.get("host"))
+            log.info("found %s at %s", fields.get("name") or ident, fields.get("host"))
             if self.on_new:
                 self.on_new(d)
         for k, v in fields.items():
@@ -141,6 +139,10 @@ class Fleet:
         d["announced"] = now
         self.save()
         return d
+
+    def by_id(self):
+        """The panels by their Kiosk Satellite id, for the leader."""
+        return {d["id"]: d for d in self.devices.values()}
 
 
 fleet = Fleet()
@@ -159,29 +161,23 @@ def _txt(info):
     return out
 
 
-async def _resolve(zc, service_type, name):
-    info = AsyncServiceInfo(service_type, name)
+async def _resolve(zc, name):
+    info = AsyncServiceInfo(SERVICE, name)
     if not await info.async_request(zc.zeroconf, 3000):
         return
     addresses = info.parsed_addresses(IPVersion.V4Only)
     if not addresses:
         return
     txt = _txt(info)
-    kind = KINDS[service_type]
-    instance = name[: -len(service_type) - 1] if name.endswith(service_type) else name
-    if kind == "ks":
-        ident = txt.get("id") or instance.removeprefix("ks-")
-        port = int(txt.get("port") or info.port or 2324)
-        # agent=1: a Kiosk Satellite running as a management agent - no
-        # dashboard, no voice, no screensaver. It is a different kind of
-        # thing in this list, not a panel that happens to be idle.
-        fleet.upsert(kind, ident, name=txt.get("name"), host=addresses[0], port=port,
-                     version=txt.get("version"), hostname=txt.get("host"),
-                     agent=txt.get("agent") == "1")
-    else:
-        ident = txt.get("did") or instance
-        fleet.upsert(kind, ident, name=txt.get("name") or instance, host=addresses[0],
-                     port=info.port or 8888, version=txt.get("ver"))
+    instance = name[: -len(SERVICE) - 1] if name.endswith(SERVICE) else name
+    ident = txt.get("id") or instance.removeprefix("ks-")
+    port = int(txt.get("port") or info.port or 2324)
+    # agent=1: a Kiosk Satellite running as a management agent - no
+    # dashboard, no voice, no screensaver. tls=1: its admin (and fleet
+    # endpoints) answer HTTPS only.
+    fleet.upsert(ident, name=txt.get("name"), host=addresses[0], port=port,
+                 version=txt.get("version"), hostname=txt.get("host"),
+                 agent=txt.get("agent") == "1", tls=txt.get("tls") == "1")
 
 
 async def discover(zc):
@@ -189,11 +185,11 @@ async def discover(zc):
 
     def on_change(zeroconf, service_type, name, state_change):
         if state_change in (ServiceStateChange.Added, ServiceStateChange.Updated):
-            task = asyncio.ensure_future(_resolve(zc, service_type, name))
+            task = asyncio.ensure_future(_resolve(zc, name))
             pending.add(task)
             task.add_done_callback(pending.discard)
 
-    return AsyncServiceBrowser(zc.zeroconf, list(KINDS), handlers=[on_change])
+    return AsyncServiceBrowser(zc.zeroconf, [SERVICE], handlers=[on_change])
 
 
 # ── Polling ───────────────────────────────────────────────────────────
@@ -239,8 +235,15 @@ def _ks_screen(h):
     return out
 
 
+def _admin_url(d):
+    scheme = "https" if d.get("tls") else "http"
+    return f"{scheme}://{d['host']}:{d.get('port', 2324)}"
+
+
 async def _poll_ks(session, d):
-    async with session.get(f"http://{d['host']}:{d.get('port', 2324)}/api/health") as r:
+    # A panel with HTTPS on serves a self-signed certificate: not verified,
+    # as between the panels themselves.
+    async with session.get(f"{_admin_url(d)}/api/health", ssl=False) as r:
         r.raise_for_status()
         h = await r.json(content_type=None)
     up = h.get("uptime") if isinstance(h.get("uptime"), dict) else {}
@@ -272,76 +275,6 @@ async def _poll_ks(session, d):
     }
 
 
-def _cells(html):
-    """{label: text} from the <tr><th>label</th><td>text</td></tr> rows that
-    ha-paneld's info endpoint serves for its own web UI."""
-    out = {}
-    for th, td in re.findall(r"<tr><th>(.*?)</th><td[^>]*>(.*?)</td></tr>", html or "", re.S):
-        # Drop the row's own links (its edit pencil) before the markup.
-        td = re.sub(r"<a\b[^>]*>.*?</a>", "", td, flags=re.S)
-        text = re.sub(r"<[^>]+>", "", td).replace("&nbsp;", " ")
-        out[re.sub(r"<[^>]+>", "", th).strip()] = unescape(text).strip()
-    return out
-
-
-def _paneld_screen(text):
-    """'1334×750 px · logical 250 dpi' as the same shape /api/health gives."""
-    m = re.search(r"(\d+)\s*[×x]\s*(\d+)", text or "")
-    if not m:
-        return None
-    w, h = int(m.group(1)), int(m.group(2))
-    out = {"width": w, "height": h, "orientation": "portrait" if h > w else "landscape"}
-    dpi = re.search(r"(\d+)\s*dpi", text or "")
-    if dpi:
-        out["dpi"] = int(dpi.group(1))
-    return out
-
-
-def _paneld_webview(text):
-    """'com.android.webview 138.0.7204.63' as (package, version)."""
-    m = re.match(r"\s*(\S+)\s+(\S+)", text or "")
-    return (m.group(1), m.group(2)) if m else (None, None)
-
-
-async def _poll_paneld(session, d):
-    base = f"http://{d['host']}:{d.get('port', 8888)}"
-    async with session.get(f"{base}/api/v1/health") as r:
-        r.raise_for_status()
-    out = {}
-    try:
-        async with session.get(f"{base}/api/v1/info") as r:
-            if r.status == 200:
-                info = await r.json(content_type=None)
-                rows = {}
-                for html in (info.get("cards") or {}).values():
-                    rows.update(_cells(html))
-                android = rows.get("Android", "").split(" (")[0]
-                api = re.search(r"API (\d+)", rows.get("Android", ""))
-                wv_package, wv_version = _paneld_webview(rows.get("System WebView"))
-                out = {
-                    "name": rows.get("Friendly name"),
-                    "version": rows.get("ha-paneld", "").split(" (")[0] or None,
-                    "model": rows.get("Model") or rows.get("Platform"),
-                    "android": f"Android {android}" if android else None,
-                    "android_api": int(api.group(1)) if api else None,
-                    "android_build": rows.get("Firmware"),
-                    "home_dashboard": rows.get("Home dashboard"),
-                    "dashboard_path_now": rows.get("Navigate"),
-                    # ha-paneld writes these for its own web UI, in its own
-                    # words: take the numbers where the shape is fixed and
-                    # keep the rest as the sentence it already wrote.
-                    "screen": _paneld_screen(rows.get("Display")),
-                    "webview": wv_version,
-                    "webview_package": wv_package,
-                    "cpu_text": rows.get("CPU"),
-                    "ram_text": rows.get("RAM"),
-                    "storage_text": rows.get("Storage"),
-                }
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-        pass
-    return out
-
-
 POLL_LOCK = asyncio.Lock()
 
 
@@ -352,7 +285,7 @@ async def poll_once(session):
 
 async def poll_device(session, d):
     try:
-        fields = await (_poll_ks if d["kind"] == "ks" else _poll_paneld)(session, d)
+        fields = await _poll_ks(session, d)
         for k, v in fields.items():
             if v not in (None, ""):
                 d[k] = v
@@ -375,38 +308,47 @@ async def _poll_all(session):
 
 async def _first_poll(session, d):
     """A panel just found is polled at once, not at the next interval."""
-    await poll_device(session, d)
-    await enrich_from_ha(session)
-    fleet.save()
+    try:
+        await poll_device(session, d)
+        await enrich_from_ha(session)
+        fleet.save()
+    except Exception:
+        log.exception("first poll of %s", d.get("name") or d["id"])
 
 
 async def poll_loop(session):
     while True:
-        await poll_once(session)
+        try:
+            await poll_once(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("polling the panels failed")
         await asyncio.sleep(SCAN_INTERVAL)
 
 
-# ── Latest releases ───────────────────────────────────────────────────
+# ── Latest release ────────────────────────────────────────────────────
 
 
 async def releases_loop(session):
     while True:
-        for kind, repo in RELEASE_REPOS.items():
-            try:
-                async with session.get(
-                    f"https://api.github.com/repos/{repo}/releases/latest",
-                    headers={"Accept": "application/vnd.github+json"},
-                ) as r:
-                    r.raise_for_status()
-                    rel = await r.json()
-                fleet.latest[kind] = {
-                    "version": rel.get("tag_name", "").lstrip("v"),
-                    "url": rel.get("html_url"),
-                    "checked": time.time(),
-                }
-            except Exception as e:
-                log.warning("latest release for %s: %s", repo, e)
-        fleet.save()
+        try:
+            async with session.get(
+                f"https://api.github.com/repos/{RELEASE_REPO}/releases/latest",
+                headers={"Accept": "application/vnd.github+json"},
+            ) as r:
+                r.raise_for_status()
+                rel = await r.json()
+            fleet.latest["ks"] = {
+                "version": rel.get("tag_name", "").lstrip("v"),
+                "url": rel.get("html_url"),
+                "checked": time.time(),
+            }
+            fleet.save()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("latest release for %s: %s", RELEASE_REPO, e)
         await asyncio.sleep(6 * 3600)
 
 
@@ -431,8 +373,8 @@ TEMPLATE = """
 
 
 async def enrich_from_ha(session):
-    """Match each kiosk to its ESPHome device by its IPv4 address sensor, and
-    read the page it reports showing. No kiosk password needed."""
+    """Match each panel to its ESPHome device by its IPv4 address sensor, and
+    read the page it reports showing."""
     if not HA_API or not HA_TOKEN:
         fleet.ha_error = "not connected to Home Assistant"
         return
@@ -449,8 +391,6 @@ async def enrich_from_ha(session):
         fleet.ha_error = f"Home Assistant: {e}"[:200]
         return
     for d in fleet.devices.values():
-        if d["kind"] != "ks":
-            continue
         v = by_ip.get(d.get("host") or "")
         if v:
             url = v.get("url") or ""
@@ -462,35 +402,47 @@ async def enrich_from_ha(session):
 # ── Web ───────────────────────────────────────────────────────────────
 
 
-def view(d):
-    latest = fleet.latest.get(d["kind"], {}).get("version")
+def view(d, leader):
+    latest = fleet.latest.get("ks", {}).get("version")
     installed = d.get("version")
     out = {k: v for k, v in d.items() if k not in ("misses",)}
     out["latest"] = latest
     out["version_status"] = version_status(installed, latest)
-    out["fork"] = fork_suffix(installed) if d["kind"] == "ks" else ""
-    port = d.get("port") or (2324 if d["kind"] == "ks" else 8888)
-    out["admin"] = f"http://{d['host']}:{port}/" if d.get("host") else None
-    if d["kind"] == "paneld":
-        now_path = d.get("dashboard_path_now")
-        home = d.get("home_dashboard") or ""
-        # "/" is ha-paneld's own start: the home dashboard, when it names one.
-        path = home if now_path in (None, "", "/") and home.startswith("/") else now_path
-        if path and path.startswith("/"):
-            out["dashboard_path"] = path
-            out["dashboard_href"] = path
+    out["fork"] = fork_suffix(installed)
+    out["admin"] = f"{_admin_url(d)}/" if d.get("host") else None
     dash = d.get("dashboard_url")
     if dash:
         p = urlparse(dash)
         out["dashboard_path"] = (p.path or "/") + (f"#{p.fragment}" if p.fragment else "")
         out["dashboard_href"] = dash
+    out["fleet"] = leader.device_fleet(d["id"])
     return out
 
 
+def _json(data, status=200):
+    return web.json_response(data, status=status, headers={"Cache-Control": "no-store"})
+
+
+async def _body(request):
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _result(error, ok_data=None):
+    if error:
+        return _json({"ok": False, "error": error}, status=400)
+    return _json({"ok": True, **(ok_data or {})})
+
+
 async def api_devices(request):
-    items = sorted((view(d) for d in fleet.devices.values()),
+    leader = request.app["leader"]
+    leader.viewed()
+    items = sorted((view(d, leader) for d in fleet.devices.values()),
                    key=lambda x: (not x.get("online"), (x.get("name") or x["id"]).lower()))
-    return web.json_response({
+    return _json({
         "devices": items,
         "version": ADDON_VERSION,
         "latest": fleet.latest,
@@ -515,11 +467,86 @@ async def api_forget(request):
     return await api_devices(request)
 
 
+async def api_leader(request):
+    leader = request.app["leader"]
+    leader.viewed()
+    return _json(leader.status_view())
+
+
+async def api_invite(request):
+    body = await _body(request)
+    error = await request.app["leader"].invite(request.match_info["id"], body.get("profile"))
+    return _result(error)
+
+
+async def api_remove(request):
+    return _result(await request.app["leader"].remove(request.match_info["id"]))
+
+
+async def api_assign(request):
+    body = await _body(request)
+    return _result(request.app["leader"].assign_profile(request.match_info["id"],
+                                                        body.get("profile")))
+
+
+async def api_sync(request):
+    """Sync now: push to one member, or every member without an id, whether
+    or not anything changed."""
+    leader = request.app["leader"]
+    body = await _body(request)
+    await leader.tick(only=body.get("id") or None, force=True)
+    return _json(leader.status_view())
+
+
+async def api_settings(request):
+    return _json(request.app["leader"].settings_view())
+
+
+async def api_settings_patch(request):
+    return _json(request.app["leader"].patch_settings(await _body(request)))
+
+
+async def api_settings_import(request):
+    body = await _body(request)
+    if not body.get("panel"):
+        return _result("Pick the panel to import from.")
+    return _result(await request.app["leader"].import_from(body["panel"]))
+
+
+async def api_settings_refresh(request):
+    body = await _body(request)
+    return _result(await request.app["leader"].refresh_definitions(body.get("panel") or None))
+
+
+async def api_profiles(request):
+    return _json(request.app["leader"].profiles_view())
+
+
+async def api_profile_set(request):
+    body = await _body(request)
+    error, pid = request.app["leader"].set_profile(body.get("profile"))
+    return _result(error, {"id": pid})
+
+
+async def api_profile_delete(request):
+    return _result(request.app["leader"].delete_profile(request.match_info["id"]))
+
+
 async def index(request):
     # Never cached: the sidebar keeps this page in a long-lived frame, so a
     # cached copy outlives several add-on updates and looks like an update
-    # that did not take.
-    return web.FileResponse(HERE / "index.html", headers={"Cache-Control": "no-store"})
+    # that did not take. The static files carry the version in their URL.
+    html = (HERE / "index.html").read_text().replace("__V__", ADDON_VERSION or str(STARTED))
+    return web.Response(text=html, content_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+
+STARTED = int(time.time())
+
+
+async def _static_headers(request, response):
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
 
 
 # Ingress is the only way in: the Supervisor's proxy address, or anything
@@ -534,30 +561,102 @@ async def only_ingress(request, handler):
     return await handler(request)
 
 
+def build_app(session, leader):
+    """The page and its API, behind ingress."""
+    app = web.Application(middlewares=[only_ingress])
+    app["session"] = session
+    app["leader"] = leader
+    app.on_response_prepare.append(_static_headers)
+    r = app.router
+    r.add_get("/", index)
+    r.add_static("/static", HERE / "static")
+    r.add_get("/api/devices", api_devices)
+    r.add_post("/api/scan", api_scan)
+    r.add_delete("/api/devices/{key}", api_forget)
+    r.add_get("/api/leader", api_leader)
+    r.add_post("/api/sync", api_sync)
+    r.add_post("/api/members/{id}/invite", api_invite)
+    r.add_delete("/api/members/{id}", api_remove)
+    r.add_post("/api/members/{id}/profile", api_assign)
+    r.add_get("/api/fleet-settings", api_settings)
+    r.add_patch("/api/fleet-settings", api_settings_patch)
+    r.add_post("/api/fleet-settings/import", api_settings_import)
+    r.add_post("/api/fleet-settings/refresh", api_settings_refresh)
+    r.add_get("/api/profiles", api_profiles)
+    r.add_post("/api/profiles", api_profile_set)
+    r.add_delete("/api/profiles/{id}", api_profile_delete)
+    return app
+
+
+def build_fleet_app(leader):
+    """What the panels reach on fleet_port: who this leader is, so a panel
+    can check an invitation came from the leader it names. Nothing else;
+    every other path is a 404."""
+    async def identity(request):
+        return web.json_response({"id": leader.id, "name": leader.name,
+                                  "version": leader.version, "leader": True, "follows": None})
+
+    app = web.Application()
+    app.router.add_get("/api/fleet/identity", identity)
+    return app
+
+
+async def _supervised(name, coro_fn):
+    """Run a loop; if it ever falls out, log it and start it again."""
+    while True:
+        try:
+            await coro_fn()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("%s stopped; restarting it", name)
+        await asyncio.sleep(5)
+
+
 async def main():
     azc = AsyncZeroconf(ip_version=IPVersion.V4Only)
     browser = await discover(azc)
-    timeout = aiohttp.ClientTimeout(total=6)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        app = web.Application(middlewares=[only_ingress])
-        app["session"] = session
-        fleet.on_new = lambda d: asyncio.ensure_future(_first_poll(session, d))
-        app.router.add_get("/", index)
-        app.router.add_get("/api/devices", api_devices)
-        app.router.add_post("/api/scan", api_scan)
-        app.router.add_delete("/api/devices/{key}", api_forget)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        port = int(os.environ.get("PORT", 8099))
-        await web.TCPSite(runner, "0.0.0.0", port).start()
-        log.info("Panel Fleet on :%d, scanning every %ds", port, SCAN_INTERVAL)
-        tasks = [asyncio.create_task(poll_loop(session)),
-                 asyncio.create_task(releases_loop(session))]
-        try:
+    leader = Leader(DATA, fleet_port=FLEET_PORT, password=PANEL_PASSWORD,
+                    version=ADDON_VERSION, devices=fleet.by_id)
+    await leader.open()
+    runners = []
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:
+            def on_new(d):
+                asyncio.ensure_future(_first_poll(session, d))
+                # A member back on the network is the moment to look again.
+                if d["id"] in leader.members:
+                    leader.schedule_tick()
+            fleet.on_new = on_new
+            # No access log: the page asks twice every fifteen seconds, and
+            # the add-on log is for what the fleet did.
+            runner = web.AppRunner(build_app(session, leader), access_log=None)
+            runners.append(runner)
+            await runner.setup()
+            port = int(os.environ.get("PORT", 8099))
+            await web.TCPSite(runner, "0.0.0.0", port).start()
+            fleet_runner = web.AppRunner(build_fleet_app(leader), access_log=None)
+            runners.append(fleet_runner)
+            await fleet_runner.setup()
+            try:
+                await web.TCPSite(fleet_runner, "0.0.0.0", FLEET_PORT).start()
+                leader.listening = True
+            except OSError as e:
+                log.error("cannot listen on fleet_port %d (%s): panels cannot accept "
+                          "invitations until it is free or fleet_port is changed", FLEET_PORT, e)
+            log.info("Panel Fleet on :%d, fleet leader %s on :%d, scanning every %ds",
+                     port, leader.id, FLEET_PORT, SCAN_INTERVAL)
+            tasks = [asyncio.create_task(_supervised("polling", lambda: poll_loop(session))),
+                     asyncio.create_task(_supervised("releases", lambda: releases_loop(session))),
+                     asyncio.create_task(_supervised("fleet leader", leader.run))]
+            leader.schedule_tick(1)
             await asyncio.gather(*tasks)
-        finally:
-            await browser.async_cancel()
-            await azc.async_close()
+    finally:
+        for r in reversed(runners):
+            await r.cleanup()
+        await leader.close()
+        await browser.async_cancel()
+        await azc.async_close()
 
 
 if __name__ == "__main__":

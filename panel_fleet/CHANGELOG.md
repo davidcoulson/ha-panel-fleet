@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- **Panel Fleet leads the Kiosk Satellite fleet.** It takes the place of the panel that led: it invites panels (the invitation is accepted on the panel's own screen), keeps one set of fleet settings, and pushes each member what its profile allows over Kiosk Satellite's own fleet protocol — the same revision fingerprint, version gate, member directory and never-synced rules as a panel leader, ported from Kiosk Satellite 2026.9.87. Panels need nothing new.
+- **Fleet settings, styled like a panel.** The page is rebuilt on the Kiosk Satellite remote admin's own stylesheet: the rail, cards, switches, sliders and second-level pages. One page per category a leader can push, drawn from the definitions of a panel you import from, with the rows the Default profile leaves at home marked. **Import from panel** reads the definitions and values (credentials included); **Refresh definitions** moves them to a newer version and keeps your values.
+- **Profiles** as on a panel: Default (editable), Updates only, and your own, each with categories, credentials, the dashboard and excluded settings.
+- **Fleet** lists every panel with its place in the fleet (Not in fleet, Invited – confirm on the panel, Member, Declined, Left) and its sync state (In sync, Syncing, Needs update to …, Offline, or the panel's own error), with Invite, Remove, a profile per member and Sync now.
+- The sidebar entry is now **Kiosk Satellite** with `mdi:satellite-variant`, and the page's header reads Kiosk Satellite · Fleet, like a panel's admin. Administrators only.
+- New options: **panel_password** (the panels' remote admin password, used only to read the settings definitions) and **fleet_port** (default 2330, where panels check an invitation came from this leader; only the leader's identity is served there).
+- The add-on now holds secrets — the panels' admin password, each member's fleet token and the fleet's credentials — in `/data`, which Home Assistant backs up. No page ever receives them. See DOCS.
+- ha-paneld is no longer supported: no discovery, polling or mention of it. Panels it found are dropped from the list.
+- A panel with HTTPS on is polled over HTTPS.
+- Not yet: custom wake word models and fleet updates are not pushed from Panel Fleet.
+
 ## 0.2.3
 
 - A Kiosk Satellite running in agent mode is tagged **Agent** (from its mDNS record), and its Display and Dashboard columns read "—": an agent shows no dashboard, so its screen size is not a fact about one. Everything else — version, network, platform, uptime, the details drawer — is unchanged, because that is exactly what an agent is there to report.
