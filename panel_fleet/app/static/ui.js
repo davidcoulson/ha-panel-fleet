@@ -137,3 +137,36 @@ export function ago(ms) {
   if (h < 48) return `${h} h ago`;
   return `${Math.floor(h / 24)} days ago`;
 }
+
+// A file as the raw body of a POST, with its progress (0..1) as it goes:
+// fetch cannot report an upload's progress, XMLHttpRequest can. Answers
+// what api() answers.
+export function upload(path, file, onProgress) {
+  return new Promise((resolve) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', path);
+    x.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    x.upload.onprogress = (e) => { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onload = () => {
+      let data = null;
+      try { data = JSON.parse(x.responseText); } catch (e) { /* not JSON */ }
+      resolve({ ok: x.status >= 200 && x.status < 300 && data?.ok !== false, status: x.status, data });
+    };
+    x.onerror = () => resolve({ ok: false, status: 0, data: { error: 'The upload did not reach the add-on.' } });
+    x.send(file);
+  });
+}
+
+// "86.4 MB".
+export function mb(bytes) {
+  return typeof bytes === 'number' ? `${(bytes / 1048576).toFixed(1)} MB` : '';
+}
+
+// A thin bar for a fraction, 0..1.
+export function bar(fraction) {
+  const b = el('span', 'pf-bar');
+  const f = el('span');
+  f.style.width = `${Math.round(Math.max(0, Math.min(1, fraction || 0)) * 100)}%`;
+  b.appendChild(f);
+  return b;
+}

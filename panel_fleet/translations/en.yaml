@@ -4,7 +4,7 @@ configuration:
     description: Seconds between polls of every panel's health.
   panel_password:
     name: Panel admin password
-    description: The remote admin password your Kiosk Satellite panels share. Used only to read the settings definitions and values from a panel (Import from panel, Refresh definitions).
+    description: The remote admin password your Kiosk Satellite panels share. Used to read the settings definitions and values from a panel (Import from panel, Refresh definitions), to accept an invitation for a panel when you ask it to, to read each member's ABI and installer before an update, and to compare a non-member's wake word models. Never logged or shown.
   fleet_port:
     name: Fleet port
     description: The port on this host the panels call back to check an invitation. Only the leader's identity is served there.

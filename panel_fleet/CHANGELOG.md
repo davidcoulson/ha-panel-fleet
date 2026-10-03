@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- **Updates**, a new page in the Fleet group: upload Kiosk Satellite APKs and install them on the members, as a panel leader's **Install on the fleet** does. Panel Fleet reads each APK's version and ABIs from the file and keeps one per ABI (arm64-v8a for the wall panels, armeabi-v7a for the projectors and other 32-bit boxes, or a universal one); each member gets the one its own ABIs take, read from its remote admin. The APK is streamed to each member's upload endpoint with its fleet token, one member at a time, then installed there, with progress and the member's own answer per row. **Keep members on this version** sends a member its APK whenever it falls behind.
+- **Agents are never woken by an update.** An agent's installer is checked before the upload and again before the install; one that would need Android's on-screen confirmation is skipped as **Needs adb/Shizuku**. Start the update helper over adb, or turn on Shizuku updates, on a projector to update it from here.
+- **Add by IP** on the Fleet page: find a kiosk mDNS cannot see by its address and port, then invite it. It is listed on Panels from then on.
+- **Accept remotely using the panel password**: Panel Fleet can accept an invitation for a panel through its remote admin (Kiosk Satellite's `fleetAccept`), after checking the invitation waiting there is its own. Nothing shows on the panel's screen. On by default for agents; **Accept for it** does the same for an invitation already sent.
+- **Wake word models**, a new page: hold a set of custom wake word models (uploaded and checked like a panel checks them) and mirror it, by checksum, on every member whose profile syncs Voice Satellite. Off until switched on, never with an empty set, and **Compare** shows what it would send and remove first.
+- An agent gets the **Updates only** profile by default when invited.
+- The panel password, fleet tokens, admin sessions and invitation nonces are kept out of the add-on log.
+
 ## 0.3.3
 
 - The sidebar entry uses the tablet-dashboard icon again.

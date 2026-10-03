@@ -36,7 +36,8 @@ async def test_no_page_ever_sees_a_secret(site):
     r = await client.post("/api/fleet-settings/import", json={"panel": panel.id})
     assert (await r.json())["ok"] is True
     r = await client.post(f"/api/members/{panel.id}/invite", json={})
-    assert (await r.json()) == {"ok": True}
+    assert (await r.json()) == {"ok": True, "pending": True, "accepted": False,
+                                "acceptError": None}
     nonce = leader.invites[panel.id]
     panel.accept()
     await client.post("/api/sync", json={})
@@ -106,3 +107,40 @@ async def test_the_page_ships_its_home_assistant_frame_module(site):
     assert "hass-dock-sidebar" not in text and "dockedSidebar =" not in text
     page = await (await client.get("/")).text()
     assert 'id="sideResults"' in page
+
+
+async def test_an_apk_upload_streams_past_client_max_size(site):
+    """The APK is streamed to /data, so a body far past aiohttp's 1 MB
+    client_max_size goes through, and the page sees only public facts."""
+    from apk_builder import build_apk
+
+    panel, leader, client, _ = site
+    data = build_apk(abis=("arm64-v8a",), payload=b"\0" * (3 * 1024 * 1024),
+                     version_name="2026.9.88", version_code=290)
+    r = await client.post("/api/updates/apk?name=ks-arm64.apk", data=data,
+                          headers={"Content-Type": "application/vnd.android.package-archive"})
+    body = await r.json()
+    assert body["ok"] is True, body
+    assert body["apk"]["abis"] == ["arm64-v8a"] and body["apk"]["size"] == len(data)
+    view = await (await client.get("/api/updates")).json()
+    assert [a["versionName"] for a in view["apks"]] == ["2026.9.88"]
+    assert "file" not in view["apks"][0]
+    r = await client.post("/api/updates/apk?name=x.apk", data=b"nope")
+    assert r.status == 400 and "not an APK" in (await r.json())["error"]
+    r = await client.delete(f"/api/updates/apk/{view['apks'][0]['id']}")
+    assert (await r.json())["ok"] is True
+
+
+async def test_wake_models_over_the_page(site):
+    _, leader, client, _ = site
+    onnx = b"\x08\x07" + b"\0" * 100
+    r = await client.post("/api/wake-models/stage?name=computer.onnx", data=onnx)
+    assert (await r.json())["ok"] is True
+    r = await client.post("/api/wake-models/stage?name=../x.onnx", data=onnx)
+    assert r.status == 400
+    r = await client.post("/api/wake-models/commit", json={})
+    assert (await r.json())["added"] == [{"engine": "openwakeword", "id": "computer"}]
+    view = await (await client.get("/api/wake-models")).json()
+    assert view["enabled"] is False and view["models"][0]["id"] == "computer"
+    r = await client.post("/api/wake-models/enabled", json={"enabled": True})
+    assert (await r.json())["ok"] is True and leader.wake.enabled

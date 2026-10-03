@@ -136,3 +136,19 @@ main > #tab-fleet { max-width: 980px; }
   .pf-member-side { flex: 1 1 100%; justify-content: flex-start; }
   .pf-member-side .fleet-status { text-align: left; }
 }
+
+/* Updates and wake word models. */
+main > #tab-updates, main > #tab-wake { max-width: 980px; }
+.pf-bar { display: inline-block; width: 120px; height: 6px; border-radius: 3px;
+  background: var(--surface-2); overflow: hidden; vertical-align: middle; }
+.pf-bar > span { display: block; height: 100%; background: var(--primary); transition: width .3s; }
+@media (prefers-reduced-motion: reduce) { .pf-bar > span { transition: none; } }
+.pf-ip-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.pf-ip-form input[type=text] { width: 170px; }
+.pf-ip-form input[type=number] { width: 96px; text-align: left; }
+.pf-accept { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px;
+  color: var(--muted); cursor: pointer; white-space: nowrap; }
+.pf-accept input:disabled + span { opacity: .55; }
+.pf-file-list { margin: 0; padding: 0 0 0 18px; color: var(--muted); font-size: 13px; }
+.pf-file-list li { overflow-wrap: anywhere; }
+.pf-mono-list { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }

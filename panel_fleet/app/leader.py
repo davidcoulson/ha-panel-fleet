@@ -3,11 +3,13 @@
 A Kiosk Satellite leader keeps a list of followers and pushes each the
 settings its profile allows, over the followers' own fleet endpoints. This
 does the same from the add-on, so no wall panel has to lead: it invites a
-panel (which the panel accepts on its own screen), polls each follower,
-holds a push while the versions differ, pushes the full set when a
-follower's applied revision is not the one it should hold, and shares the
-member directory. The rules for what travels are in ks_rules.py; this is
-the state and the wire.
+panel, found by discovery or by its address (which the panel accepts on its
+own screen, or Panel Fleet accepts for it through its remote admin with the
+panel password), polls each follower, holds a push while the versions
+differ, pushes the full set when a follower's applied revision is not the
+one it should hold, and shares the member directory. The rules for what travels are in ks_rules.py; this is
+the state and the wire. App updates are in updates.py, the custom wake
+word models in wake_models.py.
 
 What it keeps, all in /data:
 - leader.json: the id the followers know this leader by.
@@ -17,10 +19,14 @@ What it keeps, all in /data:
 - members.json: each follower's public facts and its profile.
 - secrets.json (0600): the fleet tokens and the invitation nonces. Nothing
   else reads it, and no page ever sees what is in it.
+- apks/: the uploaded APKs, one per ABI, and apks.json describing them.
+- wake_models/ and wake_models.json: the custom wake word set, and whether
+  it is mirrored.
 fleet_settings.json is 0600 as well: the fleet's credentials are values.
 """
 
 import asyncio
+import ipaddress
 import logging
 import secrets
 import socket
@@ -31,6 +37,8 @@ import aiohttp
 
 import ks_rules as ks
 from jsonfile import read_json, write_json
+from updates import FleetUpdates
+from wake_models import WakeModels
 
 log = logging.getLogger("panel_fleet.leader")
 
@@ -81,7 +89,8 @@ class Member:
     secrets file, never here."""
 
     def __init__(self, id, name="", address="", port=2324, tls=False, version="",
-                 profile=None, declined=False, added_at=None, last_sync_at=0):
+                 profile=None, declined=False, added_at=None, last_sync_at=0, agent=None,
+                 abis=None):
         self.id = id
         self.name = name
         self.address = address
@@ -92,6 +101,13 @@ class Member:
         self.declined = declined
         self.added_at = added_at or _now_ms()
         self.last_sync_at = last_sync_at
+        # Agent mode: True, False, or None until discovery or the panel's
+        # admin says. An agent's screen is never to be woken by a fleet
+        # action (see updates.py).
+        self.agent = agent
+        # Android's supported ABIs, in its preference order, from the
+        # panel's admin (/api/info). Empty until read.
+        self.abis = list(abis or [])
         # What the last poll learned. Not persisted.
         self.online = False
         self.applied_revision = None
@@ -99,6 +115,13 @@ class Member:
         self.update = None
         self.error = None
         self.roster_revision = None
+        # The installer the panel would use (getUpdateInstallerStatus) and
+        # when it was read; the custom wake word set it last matched; how
+        # much of an APK is on its way to it. Not persisted.
+        self.installer = None
+        self.installer_at = 0.0
+        self.wake_revision = None
+        self.sending = None
 
     @property
     def url(self):
@@ -110,6 +133,7 @@ class Member:
             "id": self.id, "name": self.name, "address": self.address, "port": self.port,
             "tls": self.tls, "version": self.version, "profile": self.profile,
             "declined": self.declined, "addedAt": self.added_at, "lastSyncAt": self.last_sync_at,
+            "agent": self.agent, "abis": self.abis,
         }
 
     @classmethod
@@ -124,11 +148,13 @@ class Member:
             tls=raw.get("tls") is True, version=str(raw.get("version") or ""),
             profile=raw.get("profile") or None, declined=raw.get("declined") is True,
             added_at=raw.get("addedAt"), last_sync_at=int(raw.get("lastSyncAt") or 0),
+            agent=raw.get("agent") if isinstance(raw.get("agent"), bool) else None,
+            abis=[str(a) for a in raw.get("abis") or [] if isinstance(a, str)],
         )
 
 
 class Leader:
-    def __init__(self, data_dir, *, fleet_port, password, version, devices=None):
+    def __init__(self, data_dir, *, fleet_port, password, version, devices=None, remember=None):
         self.data = Path(data_dir)
         self.fleet_port = fleet_port
         self.password = password or ""
@@ -136,6 +162,9 @@ class Leader:
         self.version = version or "dev"
         # The Kiosk Satellite panels discovery knows now, by id.
         self.devices = devices or (lambda: {})
+        # Called with a kiosk found by its address (Add by IP), so the Panels
+        # list polls it like one discovery found.
+        self.remember = remember
         self.name = "Panel Fleet"
         self.listening = False
         self.address = None
@@ -149,6 +178,8 @@ class Leader:
         self._bump = None
         self._last_tick_at = 0.0
         self._load()
+        self.updates = FleetUpdates(self, self.data)
+        self.wake = WakeModels(self, self.data)
 
     # ── Files ─────────────────────────────────────────────────────────
 
@@ -202,6 +233,8 @@ class Leader:
         self._admin = aiohttp.ClientSession(timeout=ADMIN_TIMEOUT)
 
     async def close(self):
+        await self.updates.stop()
+        await self.wake.close()
         for s in (self._http, self._admin):
             if s:
                 await s.close()
@@ -256,7 +289,10 @@ class Leader:
                     data = None
                 return r.status, data if isinstance(data, dict) else None
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            log.debug("%s %s: %s", method, url, e)
+            # An invitation's nonce is in its poll URL: never in the log.
+            shown = url.split("/api/fleet/invite/")[0] + "/api/fleet/invite/…" \
+                if "/api/fleet/invite/" in url else url
+            log.debug("%s %s: %s", method, shown, type(e).__name__)
             return None
 
     # ── Profiles ──────────────────────────────────────────────────────
@@ -371,6 +407,9 @@ class Leader:
             await self._share_roster()
             self.last_tick = time.time()
             self._last_tick_at = self.last_tick
+        # Outside the lock: an install streams for minutes and must not hold
+        # up the next tick.
+        self.updates.after_tick()
 
     async def _sync_member(self, m, force):
         # Membership survives missing multicast: discovery refreshes the
@@ -384,6 +423,8 @@ class Leader:
                 m.name = dev["name"]
             if dev.get("version"):
                 m.version = dev["version"]
+            if isinstance(dev.get("agent"), bool):  # mDNS says; a kiosk added by IP does not
+                m.agent = dev["agent"]
         if m.id in self.invites:
             await self._poll_invite(m)
             if m.id not in self.tokens:
@@ -394,13 +435,23 @@ class Leader:
         await self._poll_status(m)
         if m.error or m.id not in self.tokens:
             return
+        # Keep members on this version: one behind the uploaded APK is
+        # queued for it, whatever the settings' version.
+        self.updates.note_status(m)
         if not self._version_matches(m):
             return
         if force or m.dirty or m.applied_revision != self.fingerprint_for(m):
             await self._push(m)
+        # The custom wake word models travel only to a member in step, as a
+        # Kiosk Satellite leader sends them only after its push.
+        if not m.error and m.id in self.tokens:
+            await self.wake.sync_member(m)
 
     async def _poll_invite(self, m):
-        res = await self._request("GET", f"{m.url}/api/fleet/invite/{self.invites[m.id]}")
+        nonce = self.invites.get(m.id)
+        if not nonce:
+            return
+        res = await self._request("GET", f"{m.url}/api/fleet/invite/{nonce}")
         if not res or res[0] != 200 or res[1] is None:
             m.online = False
             return
@@ -534,9 +585,58 @@ class Leader:
 
     # ── Membership ────────────────────────────────────────────────────
 
-    async def invite(self, panel_id, profile=None):
-        """Invite a discovered panel. The invitation waits on its screen;
-        nothing syncs until it is accepted there. Answers an error or None."""
+    async def lookup(self, address, port=None):
+        """Find a kiosk by its address, for one discovery cannot see (another
+        VLAN, no multicast): Kiosk Satellite's own fleetLookup. Its public
+        identity over HTTP, then HTTPS, and the same refusals. Answers
+        (error, kiosk) without inviting or saving anything."""
+        try:
+            ip = ipaddress.ip_address(str(address or "").strip())
+        except ValueError:
+            return "Enter a valid IP address.", None
+        if port in (None, ""):
+            number = 2324
+        else:
+            try:
+                number = int(str(port).strip())
+            except ValueError:
+                number = 0
+        if not 1 <= number <= 65535:
+            return "Enter a port from 1 to 65535.", None
+        probe = Member("", address=str(ip), port=number)
+        res = await self._request("GET", f"{probe.url}/api/fleet/identity")
+        if res is None:
+            # A kiosk with HTTPS on answers only that; only this public
+            # probe is retried with the other protocol.
+            probe.tls = True
+            res = await self._request("GET", f"{probe.url}/api/fleet/identity")
+        if res is None:
+            return "That kiosk did not answer", None
+        if res[0] != 200:
+            return ("That kiosk runs a build without Fleet Management. It joins once it runs "
+                    "one."), None
+        ident = res[1] or {}
+        if (not isinstance(ident.get("id"), str) or not ident["id"]
+                or not isinstance(ident.get("name"), str)
+                or not isinstance(ident.get("version"), str)
+                or not isinstance(ident.get("leader"), bool)):
+            return "That address did not return a valid kiosk identity.", None
+        if ident["id"] == self.id:
+            return "Pick another kiosk", None
+        if ident["id"] in self.tokens or ident["id"] in self.invites:
+            return "This kiosk already belongs to this fleet.", None
+        if ident["leader"]:
+            return "That kiosk leads a fleet.", None
+        if ident.get("follows") is not None:
+            return "That kiosk already follows another leader.", None
+        return None, {"id": ident["id"], "name": ident["name"], "version": ident["version"],
+                      "address": probe.address, "port": probe.port, "tls": probe.tls}
+
+    async def invite(self, panel_id, profile=None, address=None, port=None):
+        """Invite a panel: one discovery found, a saved member, or the one at
+        `address` (found by lookup). The invitation waits on its screen;
+        nothing syncs until it is accepted there, or for it with
+        accept_remotely. Answers an error or None."""
         if not self.listening:
             return (f"Panel Fleet is not answering on port {self.fleet_port}, so no panel "
                     "could check the invitation. See the add-on log.")
@@ -545,7 +645,16 @@ class Leader:
             return "No such profile"
         dev = self.devices().get(panel_id) or {}
         saved = self.members.get(panel_id)
-        if dev.get("host"):
+        manual = address not in (None, "")
+        if manual:
+            error, found = await self.lookup(address, port)
+            if error:
+                return error
+            if found["id"] != panel_id:
+                return "The address belongs to a different kiosk or fleet"
+            probe = Member(panel_id, address=found["address"], port=found["port"],
+                           tls=found["tls"])
+        elif dev.get("host"):
             probe = Member(panel_id, address=dev["host"], port=int(dev.get("port") or 2324),
                            tls=bool(dev.get("tls")))
         elif saved and saved.address:
@@ -590,6 +699,8 @@ class Leader:
         m.declined = False
         m.online = True
         m.error = None
+        if isinstance(dev.get("agent"), bool):
+            m.agent = dev["agent"]
         data = body.get("data")
         token = data.get("token") if isinstance(data, dict) else None
         if isinstance(token, str) and token:
@@ -603,6 +714,54 @@ class Leader:
         self._save_members()
         self._save_secrets()
         log.info("invited %s at %s", m.name, address)
+        if manual and not dev and self.remember:
+            # Found by its address: the Panels list polls it from now on.
+            self.remember({"id": panel_id, "name": m.name, "host": m.address, "port": m.port,
+                           "tls": m.tls, "version": m.version})
+        self.schedule_tick()
+        return None
+
+    async def accept_remotely(self, member_id):
+        """Accept the invitation waiting on a panel for it, with the panels'
+        admin password: what tapping Accept in its remote admin does
+        (fleetAccept, which only an admin session may run, never a fleet
+        token). Nothing comes up on the panel's screen, which is the point
+        on an agent: a projector must not light up for this. Then the
+        token is collected and membership checked. Answers an error or
+        None."""
+        m = self.members.get(member_id)
+        if m is None or member_id not in self.invites:
+            return "No invitation of Panel Fleet's is waiting on that panel."
+        if not self.password:
+            return "Set panel_password in the add-on configuration to accept for the panel."
+        # The invitation pending there must be this one: fleetAccept takes
+        # whichever is waiting, and another leader's must never be accepted.
+        # Polling it by its nonce says so (and collects the token, handed
+        # out once, if someone tapped Accept meanwhile).
+        await self._poll_invite(m)
+        if member_id not in self.tokens:
+            if member_id not in self.invites:
+                self._save_members()
+                return "That panel no longer holds Panel Fleet's invitation. Invite it again."
+            if not m.online:
+                return f"{m.name or 'The panel'} did not answer."
+            try:
+                status, body = await self.admin_request(m, "POST", "/api/commands/fleetAccept", {})
+            except LookupError as e:
+                return str(e)
+            if status != 200 or not body or body.get("ok") is not True:
+                return f"{m.name or 'The panel'} did not accept: " + str(
+                    (body or {}).get("error") or f"it answered {status}")
+        if member_id in self.invites:
+            await self._poll_invite(m)
+        if member_id not in self.tokens:
+            return (f"{m.name or 'The panel'} accepted, but has not handed over its fleet token "
+                    "yet. It joins at the next check.")
+        await self._poll_status(m)
+        self._save_members()
+        if m.error:
+            return f"{m.name or 'The panel'} joined, but its status reads: {m.error}"
+        log.info("accepted the invitation on %s for it", m.name)
         self.schedule_tick()
         return None
 
@@ -627,33 +786,51 @@ class Leader:
     def _defs_by_key(self):
         return {d["key"]: d for d in self.store["definitions"]}
 
-    async def _admin_json(self, dev, path):
-        """GET an admin endpoint of a panel with its admin password: log in,
-        re-login once on 401. The session token stays in memory."""
+    async def admin_request(self, target, method, path, body=None):
+        """(status, JSON object or None) of an admin endpoint of a panel,
+        with the panels' admin password: log in, and log in again once when
+        the session has expired. `target` is anything with an id and a url
+        (a Member). The session token stays in memory and, like the
+        password, is never logged. Raises LookupError with words for the
+        page when it cannot."""
         if not self.password:
             raise LookupError("Set panel_password in the add-on configuration first.")
-        m = Member(dev["id"], address=dev["host"], port=int(dev.get("port") or 2324),
-                   tls=bool(dev.get("tls")))
+        name = getattr(target, "name", "") or target.address
         for attempt in (0, 1):
-            token = self._admin_tokens.get(m.id)
+            token = self._admin_tokens.get(target.id)
             if not token:
-                res = await self._request("POST", f"{m.url}/api/login",
+                res = await self._request("POST", f"{target.url}/api/login",
                                           body={"password": self.password}, session=self._admin)
                 if res is None:
-                    raise LookupError(f"{dev.get('name') or m.address} did not answer.")
+                    raise LookupError(f"{name} did not answer.")
                 if res[0] == 429:
-                    raise LookupError("Too many failed logins on that panel. Wait a minute.")
+                    raise LookupError(f"Too many failed logins on {name}. Wait a minute.")
                 if res[0] != 200 or not (res[1] or {}).get("token"):
-                    raise LookupError("That panel refused panel_password.")
-                token = self._admin_tokens[m.id] = res[1]["token"]
-            res = await self._request("GET", f"{m.url}{path}", token=token, session=self._admin)
+                    raise LookupError(f"{name} refused panel_password.")
+                token = self._admin_tokens[target.id] = res[1]["token"]
+            res = await self._request(method, f"{target.url}{path}", token=token, body=body,
+                                      session=self._admin)
             if res and res[0] == 401 and attempt == 0:
-                self._admin_tokens.pop(m.id, None)
+                self._admin_tokens.pop(target.id, None)
                 continue
-            if res is None or res[0] != 200 or res[1] is None:
-                raise LookupError(f"{path} on that panel answered "
-                                  f"{res[0] if res else 'nothing'}.")
-            return res[1]
+            if res is None:
+                raise LookupError(f"{name} did not answer.")
+            return res
+        raise LookupError(f"{name} refused panel_password.")
+
+    async def _admin_json(self, dev, path):
+        """GET an admin endpoint of a discovered panel: its JSON, or a
+        LookupError."""
+        m = Member(dev["id"], name=dev.get("name") or "", address=dev["host"],
+                   port=int(dev.get("port") or 2324), tls=bool(dev.get("tls")))
+        try:
+            status, body = await self.admin_request(m, "GET", path)
+        except LookupError as e:
+            # The import's own words: the page names the panel already.
+            raise LookupError(str(e).replace(m.name or m.address, "That panel", 1)) from None
+        if status != 200 or body is None:
+            raise LookupError(f"{path} on that panel answered {status}.")
+        return body
 
     async def _read_panel(self, panel_id):
         """The definitions, the version and every value (secrets included,
@@ -868,7 +1045,7 @@ class Leader:
             "version": m.version, "online": m.online, "state": state, "stateText": words,
             "phase": phase, "status": status, "tone": tone,
             "profile": profile["id"], "profileName": profile["name"],
-            "lastSyncAt": m.last_sync_at or None, "member": True,
+            "lastSyncAt": m.last_sync_at or None, "member": True, "agent": bool(m.agent),
         }
 
     def status_view(self):
@@ -878,7 +1055,8 @@ class Leader:
         for pid, d in self.devices().items():
             if pid in rows:
                 rows[pid]["discovered"] = True
-                rows[pid]["agent"] = bool(d.get("agent"))
+                if isinstance(d.get("agent"), bool):
+                    rows[pid]["agent"] = d["agent"]
                 rows[pid]["reachable"] = d.get("online")
                 continue
             rows[pid] = {
@@ -896,6 +1074,7 @@ class Leader:
                        "address": self.address, "port": self.fleet_port,
                        "listening": self.listening, "lastTick": self.last_tick},
             "passwordSet": bool(self.password),
+            "updatesOnly": ks.UPDATES_ONLY_ID,
             "store": {"version": self.store_version, "source": self.store.get("source") or "",
                       "sourceId": self.store.get("sourceId") or "",
                       "importedAt": self.store.get("importedAt"),

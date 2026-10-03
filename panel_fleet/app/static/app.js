@@ -8,6 +8,8 @@ import { renderFleet, initFleet } from './members.js';
 import { CATEGORY_NAV, PAGE_NAV } from './nav-icons.js';
 import { initPanels, renderPanels } from './panels.js';
 import { initProfiles, renderProfiles } from './profiles.js';
+import { initUpdates, renderUpdates } from './updates.js';
+import { initWake, renderWake } from './wake.js';
 import { $, api, el, esc } from './ui.js';
 import {
   categoryOf, initSettings, openCategory, renderSettings, searchSettings, settingsCategories, tabIdFor,
@@ -17,6 +19,8 @@ const PAGES = {
   panels: { title: 'Panels', sub: 'Every panel on the network' },
   fleet: { title: 'Fleet', sub: 'Invite, sync, remove' },
   profiles: { title: 'Profiles', sub: 'What each panel gets' },
+  updates: { title: 'Updates', sub: 'Install an APK on the fleet' },
+  wake: { title: 'Wake word models', sub: 'Custom models for the fleet' },
 };
 const BACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
 
@@ -113,6 +117,8 @@ function buildNav() {
     navButton('panels', 4, PAGES.panels.title, PAGES.panels.sub, PAGE_NAV.panels),
     navButton('fleet', 2, PAGES.fleet.title, PAGES.fleet.sub, PAGE_NAV.fleet),
     navButton('profiles', 3, PAGES.profiles.title, PAGES.profiles.sub, PAGE_NAV.profiles),
+    navButton('updates', 4, PAGES.updates.title, PAGES.updates.sub, PAGE_NAV.updates),
+    navButton('wake', 2, PAGES.wake.title, PAGES.wake.sub, PAGE_NAV.wake),
   ];
   // Only inside Home Assistant: the way back, with its sidebar restored.
   if (inHa) {
@@ -191,6 +197,8 @@ function go(to, { push = true } = {}) {
     show(`tab-${page}`);
     setTitle(PAGES[page].title, PAGE_NAV[page]);
     if (page === 'fleet') refresh();
+    if (page === 'updates') openUpdates();
+    if (page === 'wake') loadWake();
   }
   markNav();
   window.scrollTo(0, 0);
@@ -292,6 +300,27 @@ async function refresh() {
   }
 }
 
+// Updates: drawn at once, then again once every member's ABI and installer
+// have been read through its admin (Check), which takes a moment.
+let updatesView = null;
+async function loadUpdates(force = false) {
+  const r = await api('api/updates');
+  if (r.status === 200) { updatesView = r.data; renderUpdates(r.data, force); }
+}
+async function openUpdates() {
+  await loadUpdates(true);
+  const r = await api('api/updates/check', { method: 'POST' });
+  if (r.status === 200 && route === 'updates') { updatesView = r.data; renderUpdates(r.data); }
+}
+function comparablePanels() {
+  return (lastDevices?.devices || []).filter((d) => !d.agent && d.online)
+    .map((d) => ({ id: d.id, name: d.name || d.id }));
+}
+async function loadWake(force = true) {
+  const r = await api('api/wake-models');
+  if (r.status === 200) renderWake(r.data, comparablePanels(), force);
+}
+
 async function loadSettings() {
   const [s, p] = await Promise.all([api('api/fleet-settings'), api('api/profiles')]);
   if (s.status === 200) settingsView = s.data;
@@ -329,6 +358,8 @@ initProfiles({
   },
 });
 initSettings({ navigate: (to) => go(to) });
+initUpdates({ reload: () => loadUpdates(true) });
+initWake({ reload: () => loadWake(true) });
 
 const inHa = initHaFrame();
 applyTheme();
@@ -337,3 +368,9 @@ go(location.hash.slice(1) || 'panels', { push: false });
 await refresh();
 // The tables refresh; the settings pages never do on a timer.
 setInterval(refresh, 15000);
+// An install under way is followed closely; the page otherwise with the rest.
+let updatesTicks = 0;
+setInterval(() => {
+  updatesTicks += 1;
+  if (route === 'updates' && (updatesView?.running || updatesTicks % 8 === 0)) loadUpdates();
+}, 2000);

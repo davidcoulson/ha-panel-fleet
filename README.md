@@ -1,6 +1,6 @@
 # Panel Fleet
 
-A Home Assistant add-on that leads your Kiosk Satellite wall panels as one fleet. It shows every panel on the network at a glance — whether it is online, whether its app is current, what it is showing, a link to its own admin page — and it takes the fleet leader's place: one set of settings for the fleet, edited in pages styled like a panel's own remote admin, profiles for what each panel gets, and a push to every member that has accepted its invitation. No wall panel has to lead.
+A Home Assistant add-on that leads your Kiosk Satellite wall panels as one fleet. It shows every panel on the network at a glance — whether it is online, whether its app is current, what it is showing, a link to its own admin page — and it takes the fleet leader's place: one set of settings for the fleet, edited in pages styled like a panel's own remote admin, profiles for what each panel gets, a push to every member that has accepted its invitation, app updates installed on the members from uploaded APKs (one per ABI), and the custom wake word models mirrored on them. No wall panel has to lead.
 
 It appears in the sidebar as **Kiosk Satellite**.
 

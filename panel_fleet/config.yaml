@@ -1,5 +1,5 @@
 name: Panel Fleet
-version: "0.3.3"
+version: "0.4.0"
 slug: panel_fleet
 description: Lead your Kiosk Satellite wall panels as one fleet, keep their settings in step, and see at a glance whether each is online and up to date.
 url: https://github.com/davidcoulson/ha-panel-fleet
@@ -22,7 +22,8 @@ options:
   fleet_port: 2330
 schema:
   scan_interval: int(15,3600)
-  # The panels' remote admin password, to read the settings definitions.
+  # The panels' remote admin password: settings import, accepting an
+  # invitation for a panel, and each member's ABI and installer.
   panel_password: password?
   fleet_port: port
 build_from:

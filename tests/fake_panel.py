@@ -9,6 +9,7 @@ tests check the add-on against the protocol, not against itself.
 import hashlib
 import json
 import secrets
+import tempfile
 
 import aiohttp
 from aiohttp import web
@@ -78,6 +79,26 @@ class FakePanel:
         self.invite_error = None  # a refusal of the panel's own, verbatim
         self.rows = [dict(r) for r in SETTINGS_ROWS]
         self.values = {r["key"]: r["value"] for r in SETTINGS_ROWS} | SECRET_VALUES
+        # Updates (update_manager.dart): Android's ABIs, the installer it
+        # would use, the build it runs, and what reached it.
+        self.agent = False
+        self.abis = ["arm64-v8a", "armeabi-v7a", "armeabi"]
+        self.installer = {"nativeSilent": True, "shizukuReady": False,
+                          "helper": "unavailable", "shizukuEnabled": False,
+                          "startCommand": "adb shell ..."}
+        self.build = 286
+        self.uploads = []        # {size, length, chunked, version, code}
+        self.uploaded = None     # what installUploadedApk would install
+        self.upload_error = None
+        self.on_upload = None    # called once an upload has arrived
+        self.install_error = None
+        self.installs = []
+        self.commands = []       # (name, kind of token)
+        # Custom wake word models (custom_wake_models.dart), by folder/name.
+        self.voice = True
+        self.wake_files = {}
+        self.wake_puts, self.wake_deletes = [], []
+        self.wake_reads = 0
 
     # What a person does on the panel's screen.
     def accept(self):
@@ -106,7 +127,138 @@ class FakePanel:
         r.add_post("/api/login", self.login)
         r.add_get("/api/settings", self.settings)
         r.add_get("/api/config/export", self.export)
+        r.add_get("/api/info", self.info)
+        r.add_post("/api/update/upload", self.upload)
+        r.add_post("/api/commands/{name}", self.command)
+        r.add_get("/api/fleet/wake-models", self.wake_manifest)
+        r.add_put("/api/fleet/wake-models", self.wake_put)
+        r.add_delete("/api/fleet/wake-models", self.wake_delete)
         return app
+
+    # remote_manager.dart _fleetScoped: all a fleet token opens.
+    FLEET_SCOPED = {
+        "/api/fleet/status", "/api/fleet/apply", "/api/fleet/leave", "/api/fleet/roster",
+        "/api/fleet/wake-models", "/api/config/export", "/api/commands/getUpdateStatus",
+        "/api/commands/checkUpdateNow", "/api/commands/installUpdate", "/api/update/upload",
+        "/api/commands/installUploadedApk",
+    }
+
+    def _auth(self, request):
+        """(refusal or None, 'admin' or 'fleet'): the bearer gate, then a
+        fleet token's scope, as remote_manager.dart routes them."""
+        token = request.headers.get("Authorization", "").removeprefix("Bearer ")
+        if token in self.admin_tokens:
+            return None, "admin"
+        if token not in self.fleet_tokens:
+            return web.json_response({"error": "unauthorized"}, status=401), None
+        if not self.leader or self.fleet_tokens[token] != self.leader["id"]:
+            return web.json_response({"error": "not this kiosk's leader"}, status=403), None
+        if request.path not in self.FLEET_SCOPED:
+            return web.json_response({"error": "fleet token"}, status=403), None
+        return None, "fleet"
+
+    async def info(self, request):
+        refused, _ = self._auth(request)
+        if refused is not None:
+            return refused
+        return web.json_response({"name": self.name, "abis": self.abis, "appVersion": self.version,
+                                  "buildNumber": str(self.build)})
+
+    async def upload(self, request):
+        """receiveUpload: the raw body, checked, kept for installUploadedApk."""
+        refused, _ = self._auth(request)
+        if refused is not None:
+            return refused
+        size = 0
+        with tempfile.NamedTemporaryFile(suffix=".apk") as f:
+            async for chunk in request.content.iter_chunked(65536):
+                size += len(chunk)
+                f.write(chunk)
+            f.flush()
+            import apk as apkmod
+            try:
+                meta = apkmod.read_apk(f.name)
+            except apkmod.ApkError:
+                meta = None
+        record = {"size": size, "length": request.content_length,
+                  "chunked": "chunked" in request.headers.get("Transfer-Encoding", "").lower(),
+                  "version": meta and meta["versionName"], "code": meta and meta["versionCode"],
+                  "abis": meta and meta["abis"]}
+        self.uploads.append(record)
+        if self.on_upload:
+            self.on_upload()
+        if self.upload_error:
+            return web.json_response({"ok": False, "error": self.upload_error}, status=400)
+        if meta is None:
+            return web.json_response({"ok": False, "error": "The file is not an Android APK."},
+                                     status=400)
+        if request.content_length is not None and size != request.content_length:
+            return web.json_response({"ok": False, "error": "The upload ended early"}, status=400)
+        self.uploaded = record
+        return web.json_response({"ok": True, "data": {
+            "version": meta["versionName"], "buildNumber": meta["versionCode"], "size": size,
+            "path": "/cache/updates/x.apk", "currentVersion": self.version,
+            "currentBuild": self.build}})
+
+    async def command(self, request):
+        refused, kind = self._auth(request)
+        if refused is not None:
+            return refused
+        name = request.match_info["name"]
+        self.commands.append((name, kind))
+        if name == "fleetAccept":
+            if not self.invite or self.invite["status"] != "pending":
+                return web.json_response({"ok": False, "error": "No invitation is waiting"},
+                                         status=400)
+            self.accept()
+            return web.json_response({"ok": True, "data": True})
+        if name == "getUpdateInstallerStatus":
+            return web.json_response({"ok": True, "data": dict(self.installer)})
+        if name == "installUploadedApk":
+            if self.install_error:
+                return web.json_response({"ok": False, "error": self.install_error}, status=400)
+            if self.uploaded is None:
+                return web.json_response({"ok": False, "error": "no uploaded APK is waiting"},
+                                         status=400)
+            self.installs.append(self.uploaded)
+            return web.json_response({"ok": True, "data": {"version": self.uploaded["version"]}})
+        return web.json_response({"ok": False, "error": f"unknown command {name}"}, status=400)
+
+    def _wake_manifest(self):
+        return {k: hashlib.sha256(v).hexdigest() for k, v in self.wake_files.items()}
+
+    async def wake_manifest(self, request):
+        refused, _ = self._auth(request)
+        if refused is not None:
+            return refused
+        self.wake_reads += 1
+        if not self.voice:
+            return web.json_response({"ok": False, "error": "unknown command"}, status=400)
+        return web.json_response({"ok": True, "data": {"files": self._wake_manifest()}})
+
+    async def wake_put(self, request):
+        refused, _ = self._auth(request)
+        if refused is not None:
+            return refused
+        path = request.query.get("path", "")
+        body = await request.read()
+        if request.content_length is not None and len(body) != request.content_length:
+            return web.json_response({"ok": False, "error": "Arrived incomplete."}, status=400)
+        folder, _, name = path.partition("/")
+        if folder not in ("microwakeword", "openwakeword", "vswakeword") or not name:
+            return web.json_response({"ok": False, "error": "Not a model path."}, status=400)
+        self.wake_files[path] = body
+        self.wake_puts.append(path)
+        return web.json_response({"ok": True})
+
+    async def wake_delete(self, request):
+        refused, _ = self._auth(request)
+        if refused is not None:
+            return refused
+        path = request.query.get("path", "")
+        self.wake_files.pop(path, None)
+        self.wake_deletes.append(path)
+        return web.json_response({"ok": True})
 
     async def identity(self, request):
         return web.json_response({"id": self.id, "name": self.name, "version": self.version,
@@ -242,7 +394,10 @@ class FakePanel:
     async def settings(self, request):
         if not self._admin(request):
             return web.json_response({"error": "unauthorized"}, status=401)
-        return web.json_response({"settings": self.rows,
+        agent = {"key": "device.agent_mode", "type": "boolean", "title": "Agent mode",
+                 "description": "", "category": "Device", "default": False, "value": self.agent,
+                 "secret": False, "perDevice": True}
+        return web.json_response({"settings": [*self.rows, agent],
                                   "subpageHints": {"Idle": "When the screensaver starts"}})
 
     async def export(self, request):

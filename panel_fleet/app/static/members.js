@@ -7,8 +7,14 @@ import { $, api, ago, busy, button, card, confirmBox, el, infoRow, tag, toast } 
 
 let status = null;
 let deps = null;
-// The profile picked for a panel not yet invited, kept across redraws.
+// The profile picked for a panel not yet invited, and whether to accept the
+// invitation for it, kept across redraws.
 const invitePick = new Map();
+const acceptPick = new Map();
+// Add by IP: what was typed and who answered there.
+const ip = { address: '', port: '2324', found: null };
+
+const ACCEPT_LABEL = 'Accept remotely using the panel password';
 
 function banner(kind, title, text) {
   const b = el('div', `banner ${kind}`);
@@ -43,6 +49,37 @@ function profileSelect(value, onChange) {
   return sel;
 }
 
+// An agent (a projector, a media box) gets Updates only unless told
+// otherwise: it shows no dashboard, so the wall panels' settings mean
+// nothing to it.
+function defaultProfile(m) {
+  return m.agent ? status.updatesOnly : 'default';
+}
+
+// Accepting for the panel is on by default for an agent: tapping Accept on
+// its screen would mean waking a projector in an empty room.
+function acceptBox(key, agent) {
+  const lbl = el('label', 'pf-accept');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.disabled = !status.passwordSet;
+  cb.checked = status.passwordSet && (acceptPick.has(key) ? acceptPick.get(key) : !!agent);
+  cb.addEventListener('change', () => acceptPick.set(key, cb.checked));
+  lbl.title = status.passwordSet
+    ? "Logs in to the panel's remote admin and accepts there, as tapping Accept in its admin would. Nothing shows on its screen."
+    : 'Set panel_password in the add-on configuration first.';
+  lbl.append(cb, el('span', null, ACCEPT_LABEL));
+  return { el: lbl, input: cb };
+}
+
+function invited(r, name) {
+  const d = r.data || {};
+  if (d.accepted) toast(`${name} joined the fleet.`, 'success', 'Accepted for it');
+  else if (d.acceptError) toast(`Invited, but not accepted: ${d.acceptError}`, 'error', 'Fleet');
+  else if (d.pending) toast(`Tap Accept on ${name}'s screen to join.`, 'success', 'Invitation sent');
+  else toast(`${name} is in the fleet again.`, 'success', 'Fleet');
+}
+
 function memberRow(m) {
   const row = el('div', 'row pf-member');
   const info = el('div', 'info');
@@ -69,18 +106,30 @@ function memberRow(m) {
     side.appendChild(profileSelect(m.profile, (pid, sel) =>
       act(sel, `api/members/${encodeURIComponent(m.id)}/profile`, 'POST', { profile: pid })));
   } else {
-    side.appendChild(profileSelect(invitePick.get(m.id) || 'default', (pid) => invitePick.set(m.id, pid)));
+    side.appendChild(profileSelect(invitePick.get(m.id) || defaultProfile(m), (pid) => invitePick.set(m.id, pid)));
   }
   if (m.state === 'member') {
     side.appendChild(button('Sync now', 'btn-ghost', (e) =>
       act(e.currentTarget, 'api/sync', 'POST', { id: m.id })));
   }
+  if (m.state === 'invited') {
+    const b = button('Accept for it', 'btn-primary', (e) =>
+      act(e.currentTarget, `api/members/${encodeURIComponent(m.id)}/accept`, 'POST', {},
+        () => toast(`${m.name || 'The panel'} joined the fleet.`, 'success', 'Accepted for it')));
+    b.disabled = !status.passwordSet;
+    b.title = status.passwordSet ? `${ACCEPT_LABEL}: nothing shows on its screen.`
+      : 'Set panel_password in the add-on configuration first.';
+    side.appendChild(b);
+  }
   if (m.state !== 'member' && m.state !== 'invited') {
+    const accept = acceptBox(m.id, m.agent);
+    side.appendChild(accept.el);
     const label = m.state === 'none' ? 'Invite' : 'Invite again';
     const b = button(label, 'btn-primary', (e) =>
       act(e.currentTarget, `api/members/${encodeURIComponent(m.id)}/invite`, 'POST',
-        { profile: m.member ? m.profile : (invitePick.get(m.id) || 'default') },
-        () => toast(`Tap Accept on ${m.name || 'the panel'}'s screen to join.`, 'success', 'Invitation sent')));
+        { profile: m.member ? m.profile : (invitePick.get(m.id) || defaultProfile(m)),
+          accept: accept.input.checked },
+        (r) => invited(r, m.name || 'the panel')));
     b.disabled = m.discovered === false && !m.address;
     side.appendChild(b);
   }
@@ -179,6 +228,8 @@ export function renderFleet(data, force = false) {
   ref.appendChild(refBtn);
   defs.appendChild(ref);
 
+  renderAddByIp(root);
+
   const list = card('Panels', root);
   if (!data.members.length) {
     list.appendChild(infoRow('No Kiosk Satellite panels found yet',
@@ -186,8 +237,72 @@ export function renderFleet(data, force = false) {
   }
   for (const m of data.members) list.appendChild(memberRow(m));
   root.appendChild(el('p', 'group-note',
-    "An invitation waits on the panel's own screen until someone taps Accept there; Panel Fleet cannot accept it for the panel. " +
+    "An invitation waits on the panel's own screen until someone taps Accept there, or until Panel Fleet accepts it for the panel " +
+    "through its remote admin with panel_password (on by default for agents, whose screen is never woken). " +
     'A member only gets settings while it runs the version the fleet settings came from.'));
+}
+
+// Add by IP: a kiosk discovery cannot see (another VLAN, no multicast
+// reflector), found by its address the way a panel leader's Add by IP
+// finds one, then invited like any other.
+function renderAddByIp(root) {
+  const box = card('Add by IP', root);
+  const row = infoRow('Find a kiosk by its address',
+    "For one mDNS does not reach. Panel Fleet checks who answers there before anything is sent; the kiosk must reach this host's fleet_port too.");
+  row.classList.add('pf-wide');
+  const form = el('div', 'pf-ip-form');
+  const addr = document.createElement('input');
+  addr.type = 'text';
+  addr.placeholder = '10.2.1.4';
+  addr.value = ip.address;
+  addr.setAttribute('aria-label', 'IP address');
+  addr.addEventListener('input', () => { ip.address = addr.value; });
+  const port = document.createElement('input');
+  port.type = 'number';
+  port.min = '1';
+  port.max = '65535';
+  port.value = ip.port;
+  port.setAttribute('aria-label', 'Remote admin port');
+  port.addEventListener('input', () => { ip.port = port.value; });
+  const find = button('Find kiosk', 'btn-ghost', (e) => busy(e.currentTarget, async () => {
+    const r = await api('api/members/lookup', { method: 'POST', body: { address: addr.value.trim(), port: port.value } });
+    ip.found = r.ok ? r.data.kiosk : null;
+    if (!r.ok) toast(r.data?.error || 'That did not work.', 'error', 'Add by IP');
+    renderFleet(status, true);
+  }));
+  addr.addEventListener('keydown', (e) => { if (e.key === 'Enter') find.click(); });
+  form.append(addr, port, find);
+  row.appendChild(form);
+  box.appendChild(row);
+
+  const k = ip.found;
+  if (!k) return;
+  const known = status.members.find((m) => m.id === k.id);
+  const found = el('div', 'row pf-member');
+  const info = el('div', 'info');
+  const desc = el('div', 'desc');
+  desc.appendChild(el('span', 'pf-mono', `${k.address}:${k.port}`));
+  if (k.version) desc.appendChild(tag(k.version));
+  if (k.tls) desc.appendChild(tag('HTTPS'));
+  if (known?.agent) desc.appendChild(tag('Agent', 'agent'));
+  info.append(el('div', 'name', k.name || k.id), desc);
+  found.appendChild(info);
+  const side = el('div', 'pf-member-side');
+  const key = `ip:${k.id}`;
+  side.appendChild(profileSelect(invitePick.get(key) || (known?.agent ? status.updatesOnly : 'default'),
+    (pid) => invitePick.set(key, pid)));
+  // Not knowing what it is, accepting for it is the safe default: an agent
+  // must never be asked on its screen.
+  const accept = acceptBox(key, known ? known.agent : true);
+  side.appendChild(accept.el);
+  side.appendChild(button('Send invitation', 'btn-primary', (e) =>
+    act(e.currentTarget, `api/members/${encodeURIComponent(k.id)}/invite`, 'POST',
+      { profile: invitePick.get(key) || (known?.agent ? status.updatesOnly : 'default'),
+        address: k.address, port: k.port, accept: accept.input.checked },
+      (r) => { ip.found = null; invited(r, k.name || 'the kiosk'); })));
+  side.appendChild(button('Cancel', 'btn-text', () => { ip.found = null; renderFleet(status, true); }));
+  found.appendChild(side);
+  box.appendChild(found);
 }
 
 export function initFleet(d) { deps = d; }

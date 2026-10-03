@@ -27,8 +27,10 @@ from aiohttp import web
 from zeroconf import IPVersion, ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
+from apk import ApkError
 from jsonfile import read_json, write_json
 from leader import Leader
+from wake_models import WakeModelError
 
 log = logging.getLogger("panel_fleet")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -473,10 +475,34 @@ async def api_leader(request):
     return _json(leader.status_view())
 
 
-async def api_invite(request):
+async def api_lookup(request):
+    """Add by IP: who answers at an address, before inviting it."""
     body = await _body(request)
-    error = await request.app["leader"].invite(request.match_info["id"], body.get("profile"))
-    return _result(error)
+    error, kiosk = await request.app["leader"].lookup(body.get("address"), body.get("port"))
+    return _result(error, {"kiosk": kiosk})
+
+
+async def api_invite(request):
+    """Invite a panel; with `accept`, accept the invitation for it at once
+    through its admin (the panel password), so nothing waits on its screen."""
+    leader = request.app["leader"]
+    body = await _body(request)
+    pid = request.match_info["id"]
+    error = await leader.invite(pid, body.get("profile"), address=body.get("address"),
+                                port=body.get("port"))
+    if error:
+        return _result(error)
+    out = {"pending": pid in leader.invites, "accepted": False, "acceptError": None}
+    if body.get("accept") is True and out["pending"]:
+        out["acceptError"] = await leader.accept_remotely(pid)
+        out["accepted"] = out["acceptError"] is None
+        out["pending"] = pid in leader.invites
+    return _result(None, out)
+
+
+async def api_accept(request):
+    """Accept the invitation waiting on a panel, for it."""
+    return _result(await request.app["leader"].accept_remotely(request.match_info["id"]))
 
 
 async def api_remove(request):
@@ -532,6 +558,85 @@ async def api_profile_delete(request):
     return _result(request.app["leader"].delete_profile(request.match_info["id"]))
 
 
+# ── Updates and wake word models ──────────────────────────────────────
+
+UPLOAD_CHUNK = 1024 * 1024
+
+
+async def api_updates(request):
+    leader = request.app["leader"]
+    leader.viewed()
+    return _json(leader.updates.view())
+
+
+async def api_updates_check(request):
+    leader = request.app["leader"]
+    errors = await leader.updates.check()
+    return _json({"ok": True, "errors": errors, **leader.updates.view()})
+
+
+async def api_apk_upload(request):
+    """The APK as the raw body, streamed to /data: never read into memory,
+    so aiohttp's client_max_size (which only guards whole-body reads) does
+    not apply."""
+    leader = request.app["leader"]
+    try:
+        entry = await leader.updates.receive(request.content.iter_chunked(UPLOAD_CHUNK),
+                                             request.query.get("name") or "")
+    except ApkError as e:
+        return _result(str(e))
+    return _result(None, {"apk": {k: entry[k] for k in ("id", "versionName", "versionCode",
+                                                        "abis", "size")}})
+
+
+async def api_apk_delete(request):
+    return _result(request.app["leader"].updates.delete(request.match_info["id"]))
+
+
+async def api_updates_install(request):
+    body = await _body(request)
+    only = {body["id"]} if body.get("id") else None
+    return _result(request.app["leader"].updates.start(only))
+
+
+async def api_updates_keep(request):
+    body = await _body(request)
+    request.app["leader"].updates.set_keep(body.get("keep") is True)
+    return _result(None)
+
+
+async def api_wake(request):
+    return _json(request.app["leader"].wake.view())
+
+
+async def api_wake_stage(request):
+    try:
+        await request.app["leader"].wake.stage(request.query.get("name") or "",
+                                               request.content.iter_chunked(UPLOAD_CHUNK))
+    except WakeModelError as e:
+        return _result(str(e))
+    return _result(None)
+
+
+async def api_wake_commit(request):
+    return _json({"ok": True, **request.app["leader"].wake.commit()})
+
+
+async def api_wake_delete(request):
+    return _result(request.app["leader"].wake.delete(request.match_info["engine"],
+                                                     request.match_info["id"]))
+
+
+async def api_wake_enabled(request):
+    body = await _body(request)
+    return _result(request.app["leader"].wake.set_enabled(body.get("enabled") is True))
+
+
+async def api_wake_plan(request):
+    body = await _body(request)
+    return _json({"ok": True, **await request.app["leader"].wake.plan(body.get("panel") or None)})
+
+
 async def index(request):
     # Never cached: the sidebar keeps this page in a long-lived frame, so a
     # cached copy outlives several add-on updates and looks like an update
@@ -575,7 +680,9 @@ def build_app(session, leader):
     r.add_delete("/api/devices/{key}", api_forget)
     r.add_get("/api/leader", api_leader)
     r.add_post("/api/sync", api_sync)
+    r.add_post("/api/members/lookup", api_lookup)
     r.add_post("/api/members/{id}/invite", api_invite)
+    r.add_post("/api/members/{id}/accept", api_accept)
     r.add_delete("/api/members/{id}", api_remove)
     r.add_post("/api/members/{id}/profile", api_assign)
     r.add_get("/api/fleet-settings", api_settings)
@@ -585,6 +692,18 @@ def build_app(session, leader):
     r.add_get("/api/profiles", api_profiles)
     r.add_post("/api/profiles", api_profile_set)
     r.add_delete("/api/profiles/{id}", api_profile_delete)
+    r.add_get("/api/updates", api_updates)
+    r.add_post("/api/updates/check", api_updates_check)
+    r.add_post("/api/updates/apk", api_apk_upload)
+    r.add_delete("/api/updates/apk/{id}", api_apk_delete)
+    r.add_post("/api/updates/install", api_updates_install)
+    r.add_post("/api/updates/keep", api_updates_keep)
+    r.add_get("/api/wake-models", api_wake)
+    r.add_post("/api/wake-models/stage", api_wake_stage)
+    r.add_post("/api/wake-models/commit", api_wake_commit)
+    r.add_delete("/api/wake-models/{engine}/{id}", api_wake_delete)
+    r.add_post("/api/wake-models/enabled", api_wake_enabled)
+    r.add_post("/api/wake-models/plan", api_wake_plan)
     return app
 
 
@@ -616,8 +735,13 @@ async def _supervised(name, coro_fn):
 async def main():
     azc = AsyncZeroconf(ip_version=IPVersion.V4Only)
     browser = await discover(azc)
+    def remember(d):
+        # A kiosk added by its address: listed and polled like one mDNS found.
+        fleet.upsert(d["id"], name=d.get("name"), host=d.get("host"), port=d.get("port"),
+                     version=d.get("version"), tls=bool(d.get("tls")))
+
     leader = Leader(DATA, fleet_port=FLEET_PORT, password=PANEL_PASSWORD,
-                    version=ADDON_VERSION, devices=fleet.by_id)
+                    version=ADDON_VERSION, devices=fleet.by_id, remember=remember)
     await leader.open()
     runners = []
     try:
