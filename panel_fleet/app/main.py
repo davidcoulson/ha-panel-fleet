@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -273,7 +274,8 @@ async def _poll_ks(session, d):
         "cpu_text": f"{round(cpu['usage'])}%" + (f" · {round(cpu['temp'])} °C" if cpu.get("temp") else "")
         if isinstance(cpu.get("usage"), (int, float)) else None,
         "battery": h.get("battery"),
-        "host": h.get("ip") or d["host"],
+        # Not the panel's own "ip": the address that just answered is the
+        # one that works, and tokens and the panel password follow `host`.
     }
 
 
@@ -505,6 +507,11 @@ async def api_accept(request):
     return _result(await request.app["leader"].accept_remotely(request.match_info["id"]))
 
 
+async def api_move(request):
+    """Confirm a member moved to the address discovery announces for it."""
+    return _result(request.app["leader"].move_member(request.match_info["id"]))
+
+
 async def api_remove(request):
     return _result(await request.app["leader"].remove(request.match_info["id"]))
 
@@ -612,14 +619,20 @@ async def api_wake(request):
 async def api_wake_stage(request):
     try:
         await request.app["leader"].wake.stage(request.query.get("name") or "",
-                                               request.content.iter_chunked(UPLOAD_CHUNK))
+                                               request.content.iter_chunked(UPLOAD_CHUNK),
+                                               request.query.get("batch"))
     except WakeModelError as e:
         return _result(str(e))
     return _result(None)
 
 
 async def api_wake_commit(request):
-    return _json({"ok": True, **request.app["leader"].wake.commit()})
+    body = await _body(request)
+    try:
+        result = request.app["leader"].wake.commit(body.get("batch"))
+    except WakeModelError as e:
+        return _result(str(e))
+    return _json({"ok": True, **result})
 
 
 async def api_wake_delete(request):
@@ -655,14 +668,45 @@ async def _static_headers(request, response):
 
 
 # Ingress is the only way in: the Supervisor's proxy address, or anything
-# when run by hand.
-INGRESS_PEERS = {"172.30.32.2", "127.0.0.1", "::1"}
+# when run by hand. On the host network the loopback is shared with every
+# host-network process and add-on, so a call from there must also carry
+# the local key, which lives in this add-on's private /data (read it with
+# docker exec, which needs the host's root).
+INGRESS_PEER = "172.30.32.2"
+LOOPBACK = {"127.0.0.1", "::1"}
+LOCAL_KEY_FILE = DATA / "local_api_key"
+
+
+def _local_key():
+    try:
+        key = LOCAL_KEY_FILE.read_text().strip()
+    except OSError:
+        key = ""
+    if not key:
+        key = secrets.token_hex(24)
+        try:
+            LOCAL_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(LOCAL_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(key)
+        except OSError:
+            log.warning("cannot keep the local API key: loopback calls are refused")
+            return ""
+    return key
+
+
+LOCAL_KEY = _local_key()
 
 
 @web.middleware
 async def only_ingress(request, handler):
-    if os.environ.get("SUPERVISOR_TOKEN") and request.remote not in INGRESS_PEERS:
-        raise web.HTTPForbidden()
+    if os.environ.get("SUPERVISOR_TOKEN"):
+        remote = request.remote
+        given = request.headers.get("X-Panel-Fleet-Key", "")
+        local_ok = (remote in LOOPBACK and LOCAL_KEY and given
+                    and secrets.compare_digest(given, LOCAL_KEY))
+        if remote != INGRESS_PEER and not local_ok:
+            raise web.HTTPForbidden()
     return await handler(request)
 
 
@@ -684,6 +728,7 @@ def build_app(session, leader):
     r.add_post("/api/members/{id}/invite", api_invite)
     r.add_post("/api/members/{id}/accept", api_accept)
     r.add_delete("/api/members/{id}", api_remove)
+    r.add_post("/api/members/{id}/move", api_move)
     r.add_post("/api/members/{id}/profile", api_assign)
     r.add_get("/api/fleet-settings", api_settings)
     r.add_patch("/api/fleet-settings", api_settings_patch)

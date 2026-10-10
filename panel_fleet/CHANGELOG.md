@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1
+
+A security and reliability release, from a review of the whole add-on.
+
+- **A member's address is pinned.** Anything on the network can announce a panel's id over mDNS, so an announcement from another address no longer moves a member: its fleet token, the panel password and admin sessions only ever go to the address it joined at. The Fleet page shows **Announced at …** on that member with **Use this address**, which moves it once confirmed. A panel that gets a new DHCP lease reads offline until then; a DHCP reservation avoids it.
+- **A panel's own `ip` no longer moves it.** The address that answered the poll is the one kept.
+- **Import and Refresh definitions check who answers.** A panel whose address now belongs to another kiosk is refused, and a member is read at its pinned address. Refresh without a panel named reads only from a member, never from whatever announces the newest version.
+- **The Panels table escapes a panel's reported screen size.** A device on the network could otherwise put HTML into the page, which runs in Home Assistant's own origin.
+- **Calls from the host's loopback need the local key.** The add-on runs on the host network, so every host-network process and add-on shares that address. A call from there must carry `X-Panel-Fleet-Key`, kept in the add-on's private `/data/local_api_key`. Ingress is unchanged.
+- **Agents are never updated on a stale installer check.** A failed read before the install now counts as unknown, so the install is skipped rather than risking Android's confirmation on the projector. Discovery's agent flag counts only from the member's own address.
+- **Uploads and installs no longer overlap.** An install waits while an APK uploads, and an upload is refused while an install runs.
+- **Keep members on this version retries a failed install**, up to three times per APK. A refusal from the panel is not retried.
+- **Status checks from Updates run under the fleet's lock**, so they no longer race a sync on the same member.
+- **Wake word mirroring finishes removals.** A member is in step only once every removal has landed; a failed one is tried again at the next check.
+- **Wake word uploads keep to themselves.** Each upload stages in its own folder, and files a model does not use are listed as refused rather than dropped silently.
+
 ## 0.4.0
 
 - **Updates**, a new page in the Fleet group: upload Kiosk Satellite APKs and install them on the members, as a panel leader's **Install on the fleet** does. Panel Fleet reads each APK's version and ABIs from the file and keeps one per ABI (arm64-v8a for the wall panels, armeabi-v7a for the projectors and other 32-bit boxes, or a universal one); each member gets the one its own ABIs take, read from its remote admin. The APK is streamed to each member's upload endpoint with its fleet token, one member at a time, then installed there, with progress and the member's own answer per row. **Keep members on this version** sends a member its APK whenever it falls behind.

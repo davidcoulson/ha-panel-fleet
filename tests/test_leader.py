@@ -208,7 +208,10 @@ async def test_refresh_keeps_values_and_follows_the_definitions(rig):
     # An expired admin session is logged in again.
     panel.admin_tokens.clear()
     logins = panel.logins
-    assert await leader.refresh_definitions() is None
+    # Not a member: Refresh never picks it by itself, only when named.
+    assert leader.newest_panel() is None
+    assert await leader.refresh_definitions() == "No online panel to read the definitions from."
+    assert await leader.refresh_definitions(panel.id) is None
     assert panel.logins == logins + 1
     assert leader.store["version"] == "2026.9.88"
     assert leader.store["values"]["browser.zoom"] == 150

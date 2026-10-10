@@ -57,6 +57,9 @@ UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=15 * 60, sock_connect=10, sock_read
 # An installer status older than this is read again before it decides.
 INSTALLER_FRESH = 300
 
+# Automatic installs of one APK a member is given before Keep gives up on it.
+AUTO_ATTEMPTS = 3
+
 AGENT_BLOCKED = "Needs adb/Shizuku: Android would ask on its screen, which an agent's never is"
 
 
@@ -107,6 +110,8 @@ class FleetUpdates:
         self._task = None
         self._queued = set()
         self._auto_tried = {}  # member id -> sha256 of the APK it was given
+        self._auto_failures = {}  # member id -> failed automatic installs of that APK
+        self._receiving = 0  # uploads streaming in now
         self._session = None
 
     def _save(self):
@@ -136,6 +141,13 @@ class FleetUpdates:
         for its ABIs. Answers its entry; raises ApkError saying why not."""
         if self.running:
             raise ApkError("A fleet install is under way. Upload when it is done.")
+        self._receiving += 1
+        try:
+            return await self._receive(chunks, filename)
+        finally:
+            self._receiving -= 1
+
+    async def _receive(self, chunks, filename):
         self.dir.mkdir(parents=True, exist_ok=True)
         part = self.dir / f"upload-{secrets.token_hex(4)}.part"
         digest = hashlib.sha256()
@@ -178,6 +190,7 @@ class FleetUpdates:
         self.apks = sorted([*kept, entry], key=lambda a: (a["abis"], a["versionCode"]))
         self._save()
         self._auto_tried.clear()
+        self._auto_failures.clear()
         log.info("stored the APK %s (build %s) for %s, %.1f MB", meta["versionName"],
                  meta["versionCode"], ", ".join(meta["abis"]) or "any ABI", size / 1048576)
         self.leader.schedule_tick()
@@ -198,18 +211,27 @@ class FleetUpdates:
     def set_keep(self, on):
         self.keep = bool(on)
         self._auto_tried.clear()
+        self._auto_failures.clear()
         self._save()
         log.info("keep members on the uploaded version: %s", "on" if self.keep else "off")
         self.leader.schedule_tick()
 
     # ── Who gets what ─────────────────────────────────────────────────
 
+    def _announced_agent(self, m):
+        """Discovery's agent flag, only from the member's own address: an
+        announcement elsewhere claiming its id says nothing about it."""
+        dev = self.leader.devices().get(m.id) or {}
+        if dev.get("host") == m.address and isinstance(dev.get("agent"), bool):
+            return dev["agent"]
+        return None
+
     def is_agent(self, m):
         """Discovery's word when it has one; otherwise the member's own,
         and unknown counts as an agent: a screen is never risked."""
-        dev = self.leader.devices().get(m.id) or {}
-        if isinstance(dev.get("agent"), bool):
-            return dev["agent"]
+        announced = self._announced_agent(m)
+        if announced is not None:
+            return announced
         return m.agent is not False
 
     def apk_for(self, m):
@@ -291,8 +313,7 @@ class FleetUpdates:
             abis = (info or {}).get("abis") if status == 200 else None
             if isinstance(abis, list) and all(isinstance(x, str) for x in abis) and abis:
                 m.abis = list(abis)
-            if m.agent is None and not isinstance(
-                    (self.leader.devices().get(m.id) or {}).get("agent"), bool):
+            if m.agent is None and self._announced_agent(m) is None:
                 status, body = await self.leader.admin_request(m, "GET", "/api/settings")
                 for row in (body or {}).get("settings") or [] if status == 200 else []:
                     if isinstance(row, dict) and row.get("key") == "device.agent_mode":
@@ -306,6 +327,10 @@ class FleetUpdates:
                                if isinstance(data, dict) else None)
                 m.installer_at = time.time()
         except LookupError as e:
+            if installer:
+                # Not read now: an older answer must not decide whether an
+                # install would show on an agent's screen.
+                m.installer = None
             return str(e)
         finally:
             self.leader._save_members()
@@ -318,9 +343,10 @@ class FleetUpdates:
                    if m.id in self.leader.tokens and m.id not in self.leader.invites]
 
         async def one(m):
-            if m.id not in self.leader.tokens:
-                return None
-            await self.leader._poll_status(m)
+            async with self.leader._lock:  # the tick polls the same member
+                if m.id not in self.leader.tokens:
+                    return None
+                await self.leader._poll_status(m)
             if not m.online:
                 return None
             return await self.read_facts(m)
@@ -343,6 +369,8 @@ class FleetUpdates:
         the progress."""
         if self.running:
             return "A fleet install is already under way."
+        if self._receiving:
+            return "An APK is being uploaded. Install when it is done."
         if not self.apks:
             return "Upload an APK first."
         targets = sorted((m for m in self.leader.members.values()
@@ -377,15 +405,26 @@ class FleetUpdates:
         finally:
             self.run["done"] = True
             self.run["finishedAt"] = int(time.time() * 1000)
+            if self.run["auto"]:
+                # A failure (the upload cut off, no answer) is tried again at
+                # a later tick, a few times; a refusal ("skipped") is not.
+                for i in self.run["members"]:
+                    if self.results[i]["phase"] == "failed":
+                        n = self._auto_failures.get(i, 0) + 1
+                        self._auto_failures[i] = n
+                        if n < AUTO_ATTEMPTS:
+                            self._auto_tried.pop(i, None)
             started = [self.results[i]["name"] for i in self.run["members"]
                        if self.results[i]["phase"] == "installing"]
             log.info("%sfleet install done: %d installing (%s)", "keep-on-version " if self.run["auto"]
                      else "", len(started), ", ".join(started) or "none")
 
     async def _one(self, m, entry):
-        # Its state now, not the last tick's.
-        if m.id in self.leader.tokens:
-            await self.leader._poll_status(m)
+        # Its state now, not the last tick's. Under the leader's lock: the
+        # tick polls and pushes to the same member.
+        async with self.leader._lock:
+            if m.id in self.leader.tokens:
+                await self.leader._poll_status(m)
         if m.id not in self.leader.tokens:
             entry.update(phase="skipped", reason="No longer follows Panel Fleet")
             return
@@ -501,7 +540,7 @@ class FleetUpdates:
         self._queued.add(m.id)
 
     def after_tick(self):
-        if self._queued and not self.running:
+        if self._queued and not self.running and not self._receiving:
             ids, self._queued = set(self._queued), set()
             names = [self.leader.members[i].name for i in ids if i in self.leader.members]
             log.info("keep members on this version: updating %s", ", ".join(sorted(names)))
@@ -514,8 +553,8 @@ class FleetUpdates:
         row = {
             "id": m.id, "name": m.name, "version": m.version, "online": m.online,
             "agent": self.is_agent(m),
-            "agentKnown": isinstance((self.leader.devices().get(m.id) or {}).get("agent"), bool)
-            or m.agent is not None, "abis": m.abis,
+            "agentKnown": self._announced_agent(m) is not None or m.agent is not None,
+            "abis": m.abis,
             "apk": {"id": a["id"], "versionName": a["versionName"],
                     "abis": a["abis"]} if a else None,
             "behind": self.behind(m, a) if a else None,

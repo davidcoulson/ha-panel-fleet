@@ -34,6 +34,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -52,6 +53,11 @@ ENGINE_NAMES = {"microwakeword": "microWakeWord", "openwakeword": "openWakeWord"
 EXTENSIONS = (".json", ".tflite", ".onnx")
 MAX_FILE_BYTES = 64 * 1024 * 1024  # custom_wake_models.dart maxFileBytes
 VOICE = "Voice Satellite"
+# One upload's staging folder: the page names it, so two uploads at once
+# never take or clear each other's files. A folder left by an upload that
+# never committed is cleared after a day.
+_BATCH = re.compile(r"[A-Za-z0-9_-]{8,64}")
+STALE_STAGING = 24 * 3600
 FILE_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_connect=10)
 
 
@@ -189,11 +195,36 @@ class WakeModels:
                     pass
         return sorted(out.values(), key=lambda m: (m["id"].lower(), m["engine"]))
 
-    async def stage(self, name, chunks):
-        """One uploaded file into the staging folder, to be checked with the
-        others of the same upload by commit()."""
+    def _staging(self, batch):
+        """The staging folder of one upload (`batch`, from the page), or the
+        shared one when none is named."""
+        if batch in (None, ""):
+            return self.dir / ".staging" / "shared"
+        if not _BATCH.fullmatch(str(batch)):
+            raise WakeModelError("That upload is not named right.")
+        return self.dir / ".staging" / str(batch)
+
+    def _clear_stale_staging(self):
+        root = self.dir / ".staging"
+        if not root.is_dir():
+            return
+        now = time.time()
+        for d in root.iterdir():
+            try:
+                if d.is_dir() and now - d.stat().st_mtime > STALE_STAGING:
+                    shutil.rmtree(d, ignore_errors=True)
+                elif d.is_file():  # a file from before uploads had folders
+                    d.unlink()
+            except OSError:
+                pass
+
+    async def stage(self, name, chunks, batch=None):
+        """One uploaded file into its upload's staging folder, to be checked
+        with the others of the same upload by commit(batch)."""
         check_name(name)
-        staging = self._folder(".staging")
+        staging = self._staging(batch)
+        self._clear_stale_staging()
+        staging.mkdir(parents=True, exist_ok=True)
         part = staging / f"{name}.part"
         size = 0
         try:
@@ -210,13 +241,13 @@ class WakeModels:
             raise
         os.replace(part, staging / name)
 
-    def commit(self):
-        """Check what was staged together, keep each complete model in its
+    def commit(self, batch=None):
+        """Check what one upload staged, keep each complete model in its
         engine's folder (a model of the same name there replaced whole), and
-        clear the staging folder. Answers {added, rejected}."""
-        staging = self._folder(".staging")
+        clear that upload's staging folder. Answers {added, rejected}."""
+        staging = self._staging(batch)
         by_stem = {}
-        for f in staging.iterdir():
+        for f in (staging.iterdir() if staging.is_dir() else ()):
             if f.is_file() and not f.name.endswith(".part"):
                 by_stem.setdefault(_stem(f.name), {})[_ext(f.name)] = f
         added, rejected = [], []
@@ -232,6 +263,9 @@ class WakeModels:
                     old.unlink()
             for p in keep:
                 os.replace(p, dest / p.name)
+            rejected.extend({"file": p.name, "reason": f"Not part of the {ENGINE_NAMES[folder]} "
+                             f"model {stem}, so it was not kept."}
+                            for p in group.values() if p not in keep)
             added.append({"engine": folder, "id": stem})
             log.info("custom wake word model %s/%s added", folder, stem)
         shutil.rmtree(staging, ignore_errors=True)
@@ -314,12 +348,16 @@ class WakeModels:
                 m.error = f"Could not send the wake word model {path.split('/')[-1]}"
                 log.warning("%s: %s (%s)", m.name, m.error, status)
                 return
+        removed_all = True
         for path in plan["remove"]:
             res = await self.leader._request(
                 "DELETE", f"{m.url}/api/fleet/wake-models?path={quote(path, safe='')}",
                 token=token)
             if not res or res[0] != 200:
+                removed_all = False
                 log.warning("%s: could not remove the wake word model %s", m.name, path)
+        if not removed_all:
+            return  # tried again at the next tick
         m.wake_revision = revision
         if plan["send"] or plan["remove"]:
             log.info("wake word models in step on %s (%d files: %d sent, %d removed)", m.name,

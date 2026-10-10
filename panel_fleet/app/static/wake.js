@@ -104,11 +104,15 @@ export function renderWake(data, discovered, force = false) {
     btn.disabled = true;
     btn.textContent = 'Adding…';
     const refused = [];
+    // This upload's own staging folder on the add-on. getRandomValues, not
+    // randomUUID: Home Assistant is often served over plain http.
+    const batch = Array.from(crypto.getRandomValues(new Uint8Array(12)),
+      (b) => b.toString(16).padStart(2, '0')).join('');
     for (const f of files) {
-      const r = await upload(`api/wake-models/stage?name=${encodeURIComponent(f.name)}`, f);
+      const r = await upload(`api/wake-models/stage?batch=${batch}&name=${encodeURIComponent(f.name)}`, f);
       if (!r.ok) refused.push(`${f.name}: ${r.data?.error || 'not taken'}`);
     }
-    const c = await api('api/wake-models/commit', { method: 'POST', body: {} });
+    const c = await api('api/wake-models/commit', { method: 'POST', body: { batch } });
     for (const x of c.data?.rejected || []) refused.push(`${x.file}: ${x.reason}`);
     const added = c.data?.added || [];
     if (added.length) toast(`${added.map((a) => a.id).join(', ')}.`, 'success', `Added ${added.length} model${added.length === 1 ? '' : 's'}`);

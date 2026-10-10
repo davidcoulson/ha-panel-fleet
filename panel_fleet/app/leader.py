@@ -122,6 +122,9 @@ class Member:
         self.installer_at = 0.0
         self.wake_revision = None
         self.sending = None
+        # Another address announcing this panel's id, until someone confirms
+        # the move (move_member). Not persisted.
+        self.moved_to = None
 
     @property
     def url(self):
@@ -172,7 +175,7 @@ class Leader:
         self.watched_until = 0.0
         self._http = None
         self._admin = None
-        self._admin_tokens = {}  # panel id -> admin session token, memory only
+        self._admin_tokens = {}  # (panel id, url) -> admin session token, memory only
         self._lock = asyncio.Lock()
         self._wake = asyncio.Event()
         self._bump = None
@@ -412,19 +415,25 @@ class Leader:
         self.updates.after_tick()
 
     async def _sync_member(self, m, force):
-        # Membership survives missing multicast: discovery refreshes the
-        # address when it has one, and the saved one is tried otherwise.
+        # A member's address is pinned: its fleet token and the panel
+        # password only ever go there. Anything on the network can announce
+        # itself over mDNS with a member's id, so an announcement from
+        # another address is only shown (moved_to) until someone confirms
+        # the move; one from the pinned address refreshes what it says.
         dev = self.devices().get(m.id)
+        m.moved_to = None
         if dev and dev.get("host"):
-            m.address = dev["host"]
-            m.port = int(dev.get("port") or m.port)
-            m.tls = bool(dev.get("tls"))
-            if dev.get("name"):
-                m.name = dev["name"]
-            if dev.get("version"):
-                m.version = dev["version"]
-            if isinstance(dev.get("agent"), bool):  # mDNS says; a kiosk added by IP does not
-                m.agent = dev["agent"]
+            port = int(dev.get("port") or m.port)
+            if (dev["host"], port) != (m.address, m.port):
+                m.moved_to = {"address": dev["host"], "port": port, "tls": bool(dev.get("tls"))}
+            else:
+                m.tls = bool(dev.get("tls"))
+                if dev.get("name"):
+                    m.name = dev["name"]
+                if dev.get("version"):
+                    m.version = dev["version"]
+                if isinstance(dev.get("agent"), bool):  # mDNS says; a kiosk added by IP does not
+                    m.agent = dev["agent"]
         if m.id in self.invites:
             await self._poll_invite(m)
             if m.id not in self.tokens:
@@ -654,11 +663,13 @@ class Leader:
                 return "The address belongs to a different kiosk or fleet"
             probe = Member(panel_id, address=found["address"], port=found["port"],
                            tls=found["tls"])
+        elif saved and saved.address:
+            # Its pinned address, not an announcement claiming its id
+            # elsewhere: Use the new address (move_member) or Add by IP moves it.
+            probe = Member(panel_id, address=saved.address, port=saved.port, tls=saved.tls)
         elif dev.get("host"):
             probe = Member(panel_id, address=dev["host"], port=int(dev.get("port") or 2324),
                            tls=bool(dev.get("tls")))
-        elif saved and saved.address:
-            probe = Member(panel_id, address=saved.address, port=saved.port, tls=saved.tls)
         else:
             return "That panel is not on the network right now"
         address = probe.address
@@ -765,6 +776,29 @@ class Leader:
         self.schedule_tick()
         return None
 
+    def move_member(self, member_id):
+        """Point a member at the address discovery now announces for it,
+        once someone has confirmed it is the same panel (DHCP moved it).
+        Answers an error or None."""
+        m = self.members.get(member_id)
+        if m is None:
+            return "Not a member"
+        dev = self.devices().get(member_id) or {}
+        if not dev.get("host"):
+            return "That panel is not announcing another address now."
+        port = int(dev.get("port") or m.port)
+        if (dev["host"], port) == (m.address, m.port):
+            return None
+        log.info("%s moved from %s:%s to %s:%s, as confirmed on the page", m.name,
+                 m.address, m.port, dev["host"], port)
+        m.address, m.port, m.tls = dev["host"], port, bool(dev.get("tls"))
+        m.moved_to = None
+        m.applied_revision = None
+        m.roster_revision = None
+        self._save_members()
+        self.schedule_tick()
+        return None
+
     async def remove(self, member_id):
         """Take a panel off the list. It keeps its settings; a follower that
         is reached is told to forget this leader."""
@@ -796,8 +830,11 @@ class Leader:
         if not self.password:
             raise LookupError("Set panel_password in the add-on configuration first.")
         name = getattr(target, "name", "") or target.address
+        # A session belongs to the address it was opened at: never offered
+        # to whatever answers for that id somewhere else.
+        key = (target.id, target.url)
         for attempt in (0, 1):
-            token = self._admin_tokens.get(target.id)
+            token = self._admin_tokens.get(key)
             if not token:
                 res = await self._request("POST", f"{target.url}/api/login",
                                           body={"password": self.password}, session=self._admin)
@@ -807,22 +844,19 @@ class Leader:
                     raise LookupError(f"Too many failed logins on {name}. Wait a minute.")
                 if res[0] != 200 or not (res[1] or {}).get("token"):
                     raise LookupError(f"{name} refused panel_password.")
-                token = self._admin_tokens[target.id] = res[1]["token"]
+                token = self._admin_tokens[key] = res[1]["token"]
             res = await self._request(method, f"{target.url}{path}", token=token, body=body,
                                       session=self._admin)
             if res and res[0] == 401 and attempt == 0:
-                self._admin_tokens.pop(target.id, None)
+                self._admin_tokens.pop(key, None)
                 continue
             if res is None:
                 raise LookupError(f"{name} did not answer.")
             return res
         raise LookupError(f"{name} refused panel_password.")
 
-    async def _admin_json(self, dev, path):
-        """GET an admin endpoint of a discovered panel: its JSON, or a
-        LookupError."""
-        m = Member(dev["id"], name=dev.get("name") or "", address=dev["host"],
-                   port=int(dev.get("port") or 2324), tls=bool(dev.get("tls")))
+    async def _admin_json(self, m, path):
+        """GET an admin endpoint of a panel: its JSON, or a LookupError."""
         try:
             status, body = await self.admin_request(m, "GET", path)
         except LookupError as e:
@@ -835,20 +869,34 @@ class Leader:
     async def _read_panel(self, panel_id):
         """The definitions, the version and every value (secrets included,
         from the admin's config export) of one panel."""
-        dev = self.devices().get(panel_id)
-        if not dev or not dev.get("host"):
+        dev = self.devices().get(panel_id) or {}
+        saved = self.members.get(panel_id)
+        if saved and saved.address:
+            # A member is read where it is pinned, never where an
+            # announcement claiming its id points.
+            m = Member(panel_id, name=saved.name, address=saved.address, port=saved.port,
+                       tls=saved.tls)
+            agent = saved.agent is True or (dev.get("agent") is True
+                                            and dev.get("host") == saved.address)
+        elif dev.get("host"):
+            m = Member(panel_id, name=dev.get("name") or "", address=dev["host"],
+                       port=int(dev.get("port") or 2324), tls=bool(dev.get("tls")))
+            agent = dev.get("agent") is True
+        else:
             raise LookupError("That panel is not on the network right now.")
-        if dev.get("agent"):
+        if agent:
             raise LookupError("That panel runs as an agent, whose admin leaves out the "
                               "display and voice settings. Pick a wall panel.")
-        m = Member(panel_id, address=dev["host"], port=int(dev.get("port") or 2324),
-                   tls=bool(dev.get("tls")))
         res = await self._request("GET", f"{m.url}/api/fleet/identity", session=self._admin)
         ident = (res[1] if res and res[0] == 200 else None) or {}
         if not ident.get("version"):
             raise LookupError("That panel runs a build without Fleet Management.")
-        described = await self._admin_json(dev, "/api/settings")
-        exported = await self._admin_json(dev, "/api/config/export")
+        # A saved address can be handed to another kiosk by DHCP: never log
+        # in there, nor import its settings as this panel's.
+        if ident.get("id") != panel_id:
+            raise LookupError("That address belongs to a different kiosk now.")
+        described = await self._admin_json(m, "/api/settings")
+        exported = await self._admin_json(m, "/api/config/export")
         rows = described.get("settings")
         values = exported.get("settings")
         if not isinstance(rows, list) or not isinstance(values, dict):
@@ -870,7 +918,7 @@ class Leader:
             elif not row.get("secret") and "value" in row:
                 panel_values[row["key"]] = row["value"]
         return {
-            "version": ident["version"], "source": ident.get("name") or dev.get("name") or "",
+            "version": ident["version"], "source": ident.get("name") or m.name or "",
             "sourceId": panel_id, "definitions": definitions,
             "subpageHints": described.get("subpageHints") or {}, "values": panel_values,
         }
@@ -890,14 +938,17 @@ class Leader:
         return None
 
     def newest_panel(self):
-        """The online, non-agent panel on the newest version."""
+        """The online, non-agent member on the newest version. Only a
+        member: Refresh logs in with the panel password, which must never
+        go to whatever announced the highest version over mDNS."""
         best = None
-        for pid, d in self.devices().items():
-            if not d.get("host") or d.get("agent") or d.get("online") is False:
+        for m in self.members.values():
+            if (m.id not in self.tokens or m.id in self.invites or not m.online
+                    or not m.address or m.agent is True):
                 continue
-            if best is None or ks.is_newer(d.get("version"), best[1].get("version")):
-                best = (pid, d)
-        return best[0] if best else None
+            if best is None or ks.is_newer(m.version, best.version):
+                best = m
+        return best.id if best else None
 
     async def refresh_definitions(self, panel_id=None):
         """Move the definitions to a newer version, keeping the fleet's
@@ -1046,6 +1097,7 @@ class Leader:
             "phase": phase, "status": status, "tone": tone,
             "profile": profile["id"], "profileName": profile["name"],
             "lastSyncAt": m.last_sync_at or None, "member": True, "agent": bool(m.agent),
+            "movedTo": f"{m.moved_to['address']}:{m.moved_to['port']}" if m.moved_to else None,
         }
 
     def status_view(self):
@@ -1055,7 +1107,8 @@ class Leader:
         for pid, d in self.devices().items():
             if pid in rows:
                 rows[pid]["discovered"] = True
-                if isinstance(d.get("agent"), bool):
+                m = self.members[pid]
+                if isinstance(d.get("agent"), bool) and d.get("host") == m.address:
                     rows[pid]["agent"] = d["agent"]
                 rows[pid]["reachable"] = d.get("online")
                 continue

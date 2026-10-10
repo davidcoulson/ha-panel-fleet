@@ -92,6 +92,11 @@ function memberRow(m) {
   const stateKind = { member: 'ok', invited: 'warn', declined: 'err', left: '' }[m.state] || '';
   desc.appendChild(tag(m.stateText, stateKind));
   if (m.member && m.profile && m.profile !== 'default') desc.appendChild(tag(m.profileName));
+  if (m.movedTo) {
+    const t = tag(`Announced at ${m.movedTo}`, 'warn');
+    t.title = 'Something at another address announces this panel\'s id. Panel Fleet keeps using the address above until you confirm the move.';
+    desc.appendChild(t);
+  }
   info.append(name, desc);
   row.appendChild(info);
 
@@ -107,6 +112,17 @@ function memberRow(m) {
       act(sel, `api/members/${encodeURIComponent(m.id)}/profile`, 'POST', { profile: pid })));
   } else {
     side.appendChild(profileSelect(invitePick.get(m.id) || defaultProfile(m), (pid) => invitePick.set(m.id, pid)));
+  }
+  if (m.member && m.movedTo) {
+    side.appendChild(button('Use this address', 'btn-ghost', async (e) => {
+      const btn = e.currentTarget;
+      if (!await confirmBox(`Move ${m.name || 'this panel'} to ${m.movedTo}?`,
+        `Its fleet token and the panel password will go to ${m.movedTo} from now on. ` +
+        'Confirm only if you know the panel moved there (a new DHCP lease); anything on the network can announce a panel\'s id.',
+        'Move')) return;
+      act(btn, `api/members/${encodeURIComponent(m.id)}/move`, 'POST', {},
+        () => toast(`${m.name || 'The panel'} is now reached at ${m.movedTo}.`, 'success', 'Fleet'));
+    }));
   }
   if (m.state === 'member') {
     side.appendChild(button('Sync now', 'btn-ghost', (e) =>

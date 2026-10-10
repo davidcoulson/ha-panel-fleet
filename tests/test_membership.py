@@ -149,3 +149,42 @@ async def test_the_page_invites_and_accepts_in_one_go(aiohttp_server, aiohttp_cl
             text = await (await client.get("/api/leader")).text()
             assert projector.password not in text
             assert r.leader.tokens[projector.id] not in text
+
+
+async def test_an_announcement_elsewhere_never_moves_a_member(rig):
+    """Anything on the network can announce a member's id over mDNS: its
+    token and the panel password stay at the pinned address until the move
+    is confirmed on the page."""
+    leader = rig.leader
+    panel, _ = rig.panels
+    await rig.join(panel)
+    m = leader.members[panel.id]
+    pinned = (m.address, m.port)
+    real = dict(rig.devices[panel.id])
+    rig.devices[panel.id].update(host="10.9.9.9", port=2324, agent=True, name="Impostor")
+    await leader.tick()
+    assert (m.address, m.port) == pinned
+    assert m.name != "Impostor" and m.agent is not True
+    assert leader.member_view(m)["movedTo"] == "10.9.9.9:2324"
+    assert leader.updates.is_agent(m) is False  # the claim elsewhere says nothing
+    assert leader.membership(m)[0] == "member" and m.online
+    # Confirmed on the page: now it is reached there.
+    assert leader.move_member(panel.id) is None
+    assert (m.address, m.port) == ("10.9.9.9", 2324)
+    # And back, once the real one announces again.
+    rig.devices[panel.id].clear()
+    rig.devices[panel.id].update(real)
+    assert leader.move_member(panel.id) is None
+    assert (m.address, m.port) == pinned
+    await leader.tick()
+    assert m.online and leader.member_view(m)["movedTo"] is None
+
+
+async def test_refresh_reads_only_a_member(rig):
+    leader = rig.leader
+    panel, _ = rig.panels
+    # Discovered, newest, but not a member: never logged in to by itself.
+    rig.devices[panel.id]["version"] = "2099.1.1"
+    assert leader.newest_panel() is None
+    await rig.join(panel)
+    assert leader.newest_panel() == panel.id

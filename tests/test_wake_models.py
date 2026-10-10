@@ -151,3 +151,23 @@ async def test_not_in_step_no_models(rig):
     leader.devices()[panel.id]["version"] = panel.version
     await leader.tick()
     assert panel.wake_files == {}
+
+
+async def test_two_uploads_at_once_keep_their_own_files(tmp_path):
+    class Lead:
+        members = {}
+        def schedule_tick(self, *a):
+            pass
+    wake = wm.WakeModels(Lead(), tmp_path)
+    # Each half of two models arrives in a different upload's folder.
+    await wake.stage("hey.json", body(MICRO.encode()), "batch-aaaa")
+    await wake.stage("yo.json", body(MICRO.encode()), "batch-bbbb")
+    await wake.stage("hey.tflite", body(TFLITE), "batch-aaaa")
+    first = wake.commit("batch-aaaa")
+    assert first["added"] == [{"engine": "microwakeword", "id": "hey"}]
+    # The other upload's file is still there for its own commit.
+    await wake.stage("yo.tflite", body(TFLITE), "batch-bbbb")
+    second = wake.commit("batch-bbbb")
+    assert second["added"] == [{"engine": "microwakeword", "id": "yo"}]
+    with pytest.raises(wm.WakeModelError):
+        await wake.stage("x.onnx", body(ONNX), "../escape")

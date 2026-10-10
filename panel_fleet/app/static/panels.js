@@ -70,7 +70,7 @@ function displayCell(d) {
   const s = d.screen;
   if (!s) return '<span class="sub">unknown</span>';
   const under = [s.orientation, s.rotation ? `turned ${s.rotation}°` : ''].filter(Boolean).join(' · ');
-  return `<div class="mono">${s.width}×${s.height}</div>` + (under ? `<div class="sub">${esc(under)}</div>` : '');
+  return `<div class="mono">${esc(s.width)}×${esc(s.height)}</div>` + (under ? `<div class="sub">${esc(under)}</div>` : '');
 }
 function networkCell(d) {
   const l = d.link || {};
