@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+A dependency security release.
+
+- **aiohttp 3.14.3 to 3.14.5**, which fixes the published cookie, request-smuggling and resource-exhaustion advisories.
+- **Base image moves to `3.13-alpine3.24`** (Python 3.13 on the current Alpine branch). Alpine 3.22 is past community support. The image rebuilds on update.
+
 ## 0.4.1
 
 A security and reliability release, from a review of the whole add-on.
