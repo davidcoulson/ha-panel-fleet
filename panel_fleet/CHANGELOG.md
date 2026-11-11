@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- **A pinned Home Assistant button** in the sidebar's foot, inside Home Assistant, like Music Assistant's. It restores Home Assistant's sidebar and returns to it. The Exit to Home Assistant item stays in the Fleet group.
+
 ## 0.4.3
 
 - **Fixes the page opening as a blank strip beside a narrow sidebar inside Home Assistant.** Home Assistant 2026.11 replaced its sidebar drawer, so hiding its sidebar left 256px of empty space and squeezed the page. The page now fills the window again, with Exit to Home Assistant to get back.

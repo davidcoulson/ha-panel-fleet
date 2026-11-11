@@ -362,6 +362,8 @@ initUpdates({ reload: () => loadUpdates(true) });
 initWake({ reload: () => loadWake(true) });
 
 const inHa = initHaFrame();
+// A pinned way back, like Music Assistant's: always in the rail's foot.
+if (inHa) { $('haExit').classList.remove('hidden'); $('haExit').addEventListener('click', exitToHa); }
 applyTheme();
 await loadSettings();
 go(location.hash.slice(1) || 'panels', { push: false });
