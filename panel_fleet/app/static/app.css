@@ -454,6 +454,10 @@
   /* Inside Home Assistant the rail follows its look (as Music Assistant's
      does): flat 44px rows with a plain icon and one line, the selected row
      tinted with the accent, plain group headings that do not fold. */
+  body.in-ha #sidebar { width: 256px; background: var(--surface); }
+  body.in-ha .brand { padding: 18px 16px 12px; gap: 10px; }
+  body.in-ha .side-search { padding-inline: 12px; }
+  body.in-ha #settingsSearch { background: var(--bg); }
   body.in-ha nav#tabs { gap: 2px; padding: 4px 12px 12px; }
   body.in-ha nav#tabs button { padding: 10px 12px; gap: 16px; border-radius: 12px; }
   body.in-ha nav#tabs button.active { background: var(--primary-soft); color: var(--primary); }

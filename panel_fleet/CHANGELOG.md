@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7
+
+- **Inside Home Assistant the sidebar is 256px wide, like Home Assistant's own, on a white (card-coloured) background.**
+
 ## 0.4.6
 
 - **The Home Assistant button lays Home Assistant's sidebar over the page** on a wide screen, on a dimmed scrim, instead of docking it beside the Fleet sidebar. Click the scrim, the page, or the button again to close it.
