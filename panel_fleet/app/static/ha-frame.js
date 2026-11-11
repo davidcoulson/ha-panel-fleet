@@ -170,6 +170,7 @@ function armDeadMan(ha, styles, marked, frames) {
 // dropped a style is covered, and a frame hidden then shown again is too.
 function sync() {
   try {
+    if (paused) return;
     const ha = haWindow();
     if (!ha) return;
     const chain = ancestry();
@@ -205,11 +206,32 @@ export function exitToHa() {
   }
 }
 
+// Show Home Assistant's sidebar over this page without leaving it, as Music
+// Assistant's button does. The hiding pauses until the next press inside this
+// page. Narrow: Home Assistant's own slide-over drawer is opened (the same
+// event its menu button fires, with open:true, so no preference changes).
+// Wide: the docked sidebar simply comes back.
+let paused = false;
+export function showHaSidebar() {
+  const ha = haWindow();
+  if (!ha) return;
+  paused = true;
+  unhide(applied);
+  applied = null;
+  try {
+    if (!ha.matchMedia('(max-width: 870px)').matches) return;
+    const main = deepFind(ha.document, 'home-assistant-main');
+    main?.dispatchEvent(new ha.CustomEvent('hass-toggle-menu',
+      { detail: { open: true }, bubbles: true, composed: true }));
+  } catch (e) { /* the sidebar is unhidden either way */ }
+}
+
 let stopped = false;
 export function initHaFrame() {
   if (!haWindow()) return false;
   sync();
   setInterval(() => { if (!stopped) sync(); }, 1000);
+  window.addEventListener('pointerdown', () => { if (paused) { paused = false; sync(); } }, true);
   window.addEventListener('pagehide', restoreHaSidebar);
   window.addEventListener('beforeunload', restoreHaSidebar);
   try { window.addEventListener('unload', restoreHaSidebar); } catch (e) { /* unload may be blocked */ }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+- **The Home Assistant button now slides Home Assistant's sidebar over the page** instead of leaving it, like Music Assistant's. On a wide screen the docked sidebar comes back until you press inside the page again. Exit to Home Assistant still leaves the page.
+
 ## 0.4.4
 
 - **A pinned Home Assistant button** in the sidebar's foot, inside Home Assistant, like Music Assistant's. It restores Home Assistant's sidebar and returns to it. The Exit to Home Assistant item stays in the Fleet group.
