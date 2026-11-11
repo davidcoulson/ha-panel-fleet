@@ -68,6 +68,17 @@ export function haWindow() {
   return null;
 }
 
+// Home Assistant's theme primary colour, or null when it cannot be read.
+export function haPrimaryColor() {
+  try {
+    const w = haWindow();
+    const c = w && w.getComputedStyle(w.document.documentElement).getPropertyValue('--primary-color').trim();
+    return c || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Home Assistant's own dark mode, or null when it cannot be read.
 export function haDarkMode() {
   try {
@@ -190,6 +201,7 @@ function sync() {
 }
 
 export function restoreHaSidebar() {
+  closeOverlay();
   unhide(applied);
   applied = null;
 }
@@ -208,30 +220,68 @@ export function exitToHa() {
 
 // Show Home Assistant's sidebar over this page without leaving it, as Music
 // Assistant's button does. The hiding pauses until the next press inside this
-// page. Narrow: Home Assistant's own slide-over drawer is opened (the same
-// event its menu button fires, with open:true, so no preference changes).
-// Wide: the docked sidebar simply comes back.
+// page, the scrim, or the sidebar button again. Narrow: Home Assistant's own
+// slide-over drawer is opened (the same event its menu button fires, with
+// open:true, so no preference changes). Wide: its sidebar is laid over the
+// page on a scrim, the page keeping its full width beneath it; only <style>
+// and the scrim are added, and the sidebar's expand flag is put back.
 let paused = false;
+let overlay = null; // { styles, scrim, sidebar, prev } while the wide overlay is up
+
+const OVERLAY_MAIN_CSS = `
+  :host, :host([expanded]) { --ha-sidebar-width: 256px !important; }`;
+const OVERLAY_DRAWER_CSS = `
+  .app-content { padding-inline-start: 0 !important; }
+  .sidebar-shell { z-index: 1001 !important; box-shadow: 0 0 24px rgba(0, 0, 0, .4);
+    background: var(--sidebar-background-color, var(--card-background-color, #fff)); }`;
+
+function closeOverlay() {
+  if (!overlay) return;
+  for (const n of [...overlay.styles, overlay.scrim]) { try { n.remove(); } catch (e) { /* gone */ } }
+  try { if (overlay.sidebar) overlay.sidebar.alwaysExpand = overlay.prev; } catch (e) { /* gone */ }
+  overlay = null;
+}
+
 export function showHaSidebar() {
   const ha = haWindow();
   if (!ha) return;
+  if (overlay) { closeOverlay(); paused = false; sync(); return; }
   paused = true;
   unhide(applied);
   applied = null;
   try {
-    if (!ha.matchMedia('(max-width: 870px)').matches) return;
     const main = deepFind(ha.document, 'home-assistant-main');
-    main?.dispatchEvent(new ha.CustomEvent('hass-toggle-menu',
-      { detail: { open: true }, bubbles: true, composed: true }));
-  } catch (e) { /* the sidebar is unhidden either way */ }
+    if (ha.matchMedia('(max-width: 870px)').matches) {
+      main?.dispatchEvent(new ha.CustomEvent('hass-toggle-menu',
+        { detail: { open: true }, bubbles: true, composed: true }));
+      return;
+    }
+    const root = main?.shadowRoot;
+    if (!root) return;
+    const styles = [addStyle(root, OVERLAY_MAIN_CSS)];
+    const drawer = root.querySelector('ha-drawer');
+    if (drawer?.shadowRoot) styles.push(addStyle(drawer.shadowRoot, OVERLAY_DRAWER_CSS));
+    const scrim = ha.document.createElement('div');
+    scrim.setAttribute('style', 'position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.32)');
+    scrim.addEventListener('click', () => { closeOverlay(); paused = false; sync(); });
+    root.appendChild(scrim);
+    const sidebar = root.querySelector('ha-sidebar');
+    const prev = sidebar?.alwaysExpand;
+    if (sidebar) sidebar.alwaysExpand = true;
+    overlay = { styles, scrim, sidebar, prev };
+    // Should this page go away without a word, the watcher clears the overlay too.
+    armDeadMan(ha, [...styles, scrim], [], chainFrames());
+  } catch (e) { closeOverlay(); }
 }
+
+function chainFrames() { return ancestry().map((c) => c.frame); }
 
 let stopped = false;
 export function initHaFrame() {
   if (!haWindow()) return false;
   sync();
   setInterval(() => { if (!stopped) sync(); }, 1000);
-  window.addEventListener('pointerdown', () => { if (paused) { paused = false; sync(); } }, true);
+  window.addEventListener('pointerdown', () => { if (paused) { closeOverlay(); paused = false; sync(); } }, true);
   window.addEventListener('pagehide', restoreHaSidebar);
   window.addEventListener('beforeunload', restoreHaSidebar);
   try { window.addEventListener('unload', restoreHaSidebar); } catch (e) { /* unload may be blocked */ }

@@ -2,7 +2,7 @@
 // fleet. The rail and pages are the panel admin's (app.css); this wires the
 // navigation, the theme, the refresh and the pages together.
 
-import { exitToHa, haDarkMode, initHaFrame, showHaSidebar } from './ha-frame.js';
+import { exitToHa, haDarkMode, haPrimaryColor, initHaFrame, showHaSidebar } from './ha-frame.js';
 import { SUBPAGE_ICONS } from './ks-icons.js';
 import { renderFleet, initFleet } from './members.js';
 import { CATEGORY_NAV, PAGE_NAV } from './nav-icons.js';
@@ -363,6 +363,16 @@ initWake({ reload: () => loadWake(true) });
 
 const inHa = initHaFrame();
 // A pinned way back, like Music Assistant's: always in the rail's foot.
+if (inHa) {
+  // Look like Home Assistant: its accent, its flatter rail (body.in-ha in app.css).
+  document.body.classList.add('in-ha');
+  const c = haPrimaryColor();
+  if (c) {
+    const st = document.documentElement.style;
+    st.setProperty('--primary', c); st.setProperty('--primary-fill', c);
+    st.setProperty('--primary-soft', `color-mix(in srgb, ${c} 14%, transparent)`);
+  }
+}
 if (inHa) { $('haExit').classList.remove('hidden'); $('haExit').addEventListener('click', showHaSidebar); }
 applyTheme();
 await loadSettings();

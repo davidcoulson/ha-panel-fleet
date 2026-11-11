@@ -451,6 +451,22 @@
   .nav-dot { display: inline-block; width: 8px; height: 8px; margin-left: 8px;
     border-radius: 50%; background: var(--primary-fill); vertical-align: 1px; }
 
+  /* Inside Home Assistant the rail follows its look (as Music Assistant's
+     does): flat 44px rows with a plain icon and one line, the selected row
+     tinted with the accent, plain group headings that do not fold. */
+  body.in-ha nav#tabs { gap: 2px; padding: 4px 12px 12px; }
+  body.in-ha nav#tabs button { padding: 10px 12px; gap: 16px; border-radius: 12px; }
+  body.in-ha nav#tabs button.active { background: var(--primary-soft); color: var(--primary); }
+  body.in-ha .disc { width: 24px; height: 24px; background: transparent !important;
+    color: inherit; border-radius: 0; }
+  body.in-ha .disc svg { width: 24px; height: 24px; }
+  body.in-ha .nav-sub { display: none; }
+  body.in-ha .nav-title { font-size: 14.5px; font-weight: 500; }
+  body.in-ha .nav-head { text-transform: none; letter-spacing: 0; font-size: 14px;
+    font-weight: 500; margin: 14px 0 2px; cursor: default; }
+  body.in-ha .nav-head::after { display: none; }
+  body.in-ha nav#tabs .nav-group.collapsed button { display: flex; }
+
   .side-foot { padding: 10px 16px 14px; }
   .foot-stats { display: flex; gap: 12px; padding: 0 8px 10px; min-height: 29px; }
   .stat { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }

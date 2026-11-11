@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6
+
+- **The Home Assistant button lays Home Assistant's sidebar over the page** on a wide screen, on a dimmed scrim, instead of docking it beside the Fleet sidebar. Click the scrim, the page, or the button again to close it.
+- **Inside Home Assistant the sidebar follows its look**: flat one-line rows with a plain icon, the selected row tinted, plain group headings, and Home Assistant's own accent colour.
+
 ## 0.4.5
 
 - **The Home Assistant button now slides Home Assistant's sidebar over the page** instead of leaving it, like Music Assistant's. On a wide screen the docked sidebar comes back until you press inside the page again. Exit to Home Assistant still leaves the page.
