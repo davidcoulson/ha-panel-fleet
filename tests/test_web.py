@@ -104,6 +104,8 @@ async def test_the_page_ships_its_home_assistant_frame_module(site):
     text = await r.text()
     # A temporary style only: never Home Assistant's own sidebar preference.
     assert "panel-fleet-hide-sidebar" in text
+    # Both drawers: HA 2026.11's ha-drawer (--ha-sidebar-width) and the old mwc one.
+    assert "--ha-sidebar-width: 0px" in text and "--mdc-drawer-width: 0px" in text
     assert "hass-dock-sidebar" not in text and "dockedSidebar =" not in text
     page = await (await client.get("/")).text()
     assert 'id="sideResults"' in page

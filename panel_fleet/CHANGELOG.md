@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- **Fixes the page opening as a blank strip beside a narrow sidebar inside Home Assistant.** Home Assistant 2026.11 replaced its sidebar drawer, so hiding its sidebar left 256px of empty space and squeezed the page. The page now fills the window again, with Exit to Home Assistant to get back.
+
 ## 0.4.2
 
 A dependency security release.

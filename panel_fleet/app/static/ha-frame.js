@@ -14,18 +14,25 @@
 //
 // What is reached for (Home Assistant frontend, 2026.9):
 //   home-assistant > #shadow-root > home-assistant-main > #shadow-root
-//     > ha-drawer (an mwc drawer: aside.mdc-drawer, .mdc-drawer-app-content,
-//       sized by --mdc-drawer-width) > ha-sidebar
+//     > ha-drawer (2026.11: .sidebar-shell + .app-content, sized by
+//       --ha-sidebar-width; earlier an mwc drawer: aside.mdc-drawer,
+//       .mdc-drawer-app-content, sized by --mdc-drawer-width) > ha-sidebar
 //   hassio-ingress-view > #shadow-root > .header (narrow only) + iframe
 
 const STYLE_ID = 'panel-fleet-hide-sidebar';
 const MARK = 'data-panel-fleet-hidden';
 
+// Newer Home Assistant (2026.11): ha-drawer is its own element, sized by
+// --ha-sidebar-width (56px, 256px when :host([expanded])), with the content
+// padded by that width. Older: an mwc drawer sized by --mdc-drawer-width.
 const MAIN_CSS = `
+  :host, :host([expanded]) { --ha-sidebar-width: 0px !important; }
   :host { --mdc-drawer-width: 0px !important; }
   ha-drawer { --mdc-drawer-width: 0px !important; }
   ha-sidebar { display: none !important; }`;
 const DRAWER_CSS = `
+  .sidebar-shell { display: none !important; }
+  .app-content { padding-inline-start: 0 !important; }
   .mdc-drawer, .mdc-drawer-scrim { display: none !important; }
   .mdc-drawer-app-content { padding-left: 0 !important; padding-inline-start: 0 !important;
     margin-left: 0 !important; margin-inline-start: 0 !important; }`;
