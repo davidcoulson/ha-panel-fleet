@@ -197,6 +197,13 @@ def version_name(version):
     return str(version or "").split("+")[0].strip()
 
 
+def build_key(v):
+    """Every number in the version name, in order: tells two fork builds of
+    one release apart (2026.10.4-djc-2026.10.02.2 against .3), which is_newer's
+    first three numbers cannot."""
+    return [int(m) for m in re.findall(r"\d+", version_name(v))]
+
+
 def is_newer(a, b):
     """isNewer: the first three numbers of each release, compared."""
     def nums(v):

@@ -946,7 +946,9 @@ class Leader:
             if (m.id not in self.tokens or m.id in self.invites or not m.online
                     or not m.address or m.agent is True):
                 continue
-            if best is None or ks.is_newer(m.version, best.version):
+            if (best is None or ks.is_newer(m.version, best.version)
+                    or (not ks.is_newer(best.version, m.version)
+                        and ks.build_key(m.version) > ks.build_key(best.version))):
                 best = m
         return best.id if best else None
 

@@ -8,7 +8,7 @@
 // touches these pages, so nothing typed is ever wiped.
 
 import { subpageIcon } from './ks-icons.js';
-import { $, api, el, tag } from './ui.js';
+import { $, api, card, el, tag } from './ui.js';
 
 let view = null;          // /api/fleet-settings
 let defaults = null;      // the Default profile, for the row flags

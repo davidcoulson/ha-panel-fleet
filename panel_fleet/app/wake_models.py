@@ -143,6 +143,7 @@ class WakeModels:
         self.enabled = isinstance(state, dict) and state.get("enabled") is True
         self._hashes = {}  # path -> (size, mtime, sha256)
         self._session = None
+        self._gen = 0  # bumped when mirroring changes: a sync begun before it stops
 
     def _save(self):
         write_json(self._state_file, {"enabled": self.enabled})
@@ -291,6 +292,7 @@ class WakeModels:
             return ("Add models first: mirroring an empty set would delete every member's "
                     "custom models.")
         self.enabled = bool(on)
+        self._gen += 1
         for m in self.leader.members.values():
             m.wake_revision = None
         self._save()
@@ -337,12 +339,18 @@ class WakeModels:
         revision = self.revision(mine)
         if m.wake_revision == revision:
             return
+        gen = self._gen
+
+        def live():
+            return self.enabled and self._gen == gen
         token = self.leader.tokens.get(m.id)
         theirs, _ = await self._their_files(m, token)
-        if theirs is None:
+        if theirs is None or not live():
             return
         plan = diff(mine, theirs)
         for path in plan["send"]:
+            if not live():
+                return
             status = await self._send(m, token, path)
             if status != 200:
                 m.error = f"Could not send the wake word model {path.split('/')[-1]}"
@@ -350,6 +358,8 @@ class WakeModels:
                 return
         removed_all = True
         for path in plan["remove"]:
+            if not live():
+                return
             res = await self.leader._request(
                 "DELETE", f"{m.url}/api/fleet/wake-models?path={quote(path, safe='')}",
                 token=token)
@@ -358,6 +368,8 @@ class WakeModels:
                 log.warning("%s: could not remove the wake word model %s", m.name, path)
         if not removed_all:
             return  # tried again at the next tick
+        if not live():
+            return
         m.wake_revision = revision
         if plan["send"] or plan["remove"]:
             log.info("wake word models in step on %s (%d files: %d sent, %d removed)", m.name,

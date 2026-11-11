@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.8
+
+Fixes from a review of the whole add-on.
+
+- **A settings page with nothing to show no longer crashes** the page (a missing import), which also stopped navigation and polling from starting.
+- **Refresh picks the newest fork build.** Two members on the same release but different `-djc-` builds no longer leave the older one as the definitions source.
+- **Turning off wake word mirroring stops a sync already under way**, so it can no longer delete a member's models after you switched it off.
+- **A hidden or removed page puts Home Assistant's sidebar back as it was**, including its expanded state after the overlay.
+- **An APK's manifest is size-capped while it is read**, so a crafted upload cannot exhaust the add-on's memory.
+
 ## 0.4.7
 
 - **Inside Home Assistant the sidebar is 256px wide, like Home Assistant's own, on a white (card-coloured) background.**

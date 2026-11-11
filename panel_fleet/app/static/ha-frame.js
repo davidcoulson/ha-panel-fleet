@@ -161,18 +161,19 @@ function unhide(state) {
 // hearing about it, the styles still go within a second. Built with Home
 // Assistant's Function so it runs in that realm; if that is refused, the
 // page's own listeners below are the only guard.
-function armDeadMan(ha, styles, marked, frames) {
+function armDeadMan(ha, styles, marked, frames, restore) {
   try {
-    const watch = new ha.Function('styles', 'marked', 'frames', 'MARK', `
+    const watch = new ha.Function('styles', 'marked', 'frames', 'MARK', 'restore', `
       const t = setInterval(() => {
         const live = styles.filter((s) => s.isConnected);
         if (!live.length) { clearInterval(t); return; }
         if (frames.every((f) => f.isConnected && f.getClientRects().length > 0)) return;
         live.forEach((s) => s.remove());
         marked.forEach((el) => el.removeAttribute(MARK));
+        if (restore && restore.sidebar) restore.sidebar.alwaysExpand = restore.prev;
         clearInterval(t);
       }, 1000);`);
-    watch(styles, marked, frames, MARK);
+    watch(styles, marked, frames, MARK, restore);
   } catch (e) { /* no eval there: the page's listeners still restore */ }
 }
 
@@ -270,7 +271,7 @@ export function showHaSidebar() {
     if (sidebar) sidebar.alwaysExpand = true;
     overlay = { styles, scrim, sidebar, prev };
     // Should this page go away without a word, the watcher clears the overlay too.
-    armDeadMan(ha, [...styles, scrim], [], chainFrames());
+    armDeadMan(ha, [...styles, scrim], [], chainFrames(), { sidebar, prev });
   } catch (e) { closeOverlay(); }
 }
 

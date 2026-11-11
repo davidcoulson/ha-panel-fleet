@@ -132,15 +132,25 @@ def native_abis(names):
     return sorted(abis)
 
 
+MAX_MANIFEST = 4 * 1024 * 1024
+
+
 def read_apk(path):
     """{package, versionName, versionCode, abis} of the APK at `path`, or
     an ApkError saying why it is not one."""
     try:
         with zipfile.ZipFile(path) as z:
             try:
-                manifest = z.read("AndroidManifest.xml")
+                info = z.getinfo("AndroidManifest.xml")
             except KeyError as e:
                 raise ApkError("The file has no AndroidManifest.xml: not an APK.") from e
+            # The upload limit bounds compressed bytes only: cap what inflates.
+            if info.file_size > MAX_MANIFEST:
+                raise ApkError("AndroidManifest.xml is too large: not an APK.")
+            with z.open(info) as f:
+                manifest = f.read(MAX_MANIFEST + 1)
+            if len(manifest) > MAX_MANIFEST:
+                raise ApkError("AndroidManifest.xml is too large: not an APK.")
             names = z.namelist()
     except zipfile.BadZipFile as e:
         raise ApkError("The file is not an APK (not a zip archive).") from e

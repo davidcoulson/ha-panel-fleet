@@ -168,3 +168,9 @@ def test_parse_profile():
     assert p["excluded"] == ks.FLEET_DEFAULT_EXCLUDED
     assert p["dashboard"] is False
     assert ks.parse_profile({"id": "x"}) is None
+
+
+def test_build_key_tells_fork_builds_of_one_release_apart():
+    a, b = "2026.10.4-djc-2026.10.02.2", "2026.10.4-djc-2026.10.02.3"
+    assert not ks.is_newer(b, a)  # the first three numbers match
+    assert ks.build_key(b) > ks.build_key(a)

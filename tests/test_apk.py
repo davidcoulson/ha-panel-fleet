@@ -65,3 +65,11 @@ def test_choose_apk_follows_the_device_preference():
     assert apk.choose_apk([], panel) is None
     assert apk.choose_apk([{"id": "pure", "abis": [], "versionCode": 1}], projector)["id"] == "pure"
     assert apk.runs_on([], ["x86"]) and not apk.runs_on(["arm64-v8a"], projector)
+
+
+def test_a_huge_manifest_is_refused_before_it_inflates(tmp_path):
+    p = tmp_path / "bomb.apk"
+    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("AndroidManifest.xml", b"\0" * (apk.MAX_MANIFEST + 1))
+    with pytest.raises(apk.ApkError, match="too large"):
+        apk.read_apk(p)
